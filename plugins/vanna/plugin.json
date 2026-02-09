@@ -1,0 +1,7 @@
+{
+    "name": "Vanna AI SQL",
+    "description": "Text to SQL using Vanna AI",
+    "author_name": "7pm",
+    "version": "1.2",
+    "tags": "vanna,sql,text to sql,database"
+}

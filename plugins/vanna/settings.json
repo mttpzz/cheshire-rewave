@@ -1,0 +1,7 @@
+{
+    "mysql_host": "host.docker.internal",
+    "mysql_dbname": "classicmodels",
+    "mysql_user": "root",
+    "mysql_password": "password",
+    "mysql_port": 3306
+}

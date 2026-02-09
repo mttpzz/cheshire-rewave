@@ -1,0 +1,2 @@
+PyMySQL==1.1.1
+vanna[qdrant,openai,mysql]==0.7.9

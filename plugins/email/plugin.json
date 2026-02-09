@@ -1,0 +1,7 @@
+{
+    "name": "Mail handler",
+    "description": "Read and write email for Office365",
+    "author_name": "7pm",
+    "version": "0.1",
+    "tags": "email,outlook"
+}
