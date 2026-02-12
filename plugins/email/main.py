@@ -1,10 +1,12 @@
-from cat.mad_hatter.decorators import tool, plugin # type: ignore
+from cat.mad_hatter.decorators import tool, plugin, hook # type: ignore
 from pydantic import BaseModel
 import msal
 import requests
 import sys
 import os
 import atexit
+from bs4 import BeautifulSoup
+import json
 from dotenv import load_dotenv
 
 # load environment variables from .env file
@@ -108,7 +110,7 @@ def fetch_emails(access_token, target_email, num_emails):
     }
     params = {
         '$top': num_emails,
-        '$select': 'subject,from,toRecipients,receivedDateTime,bodyPreview,isRead',
+        '$select': 'subject,from,toRecipients,receivedDateTime,body,isRead',
         '$orderby': 'receivedDateTime desc'
     }
     # Microsoft Graph Endpoint to read all the emails
@@ -129,7 +131,14 @@ def fetch_emails(access_token, target_email, num_emails):
             sender_name = email.get('from', {}).get('emailAddress', {}).get('name', 'Sconosciuto')
             sender_address = email.get('from', {}).get('emailAddress', {}).get('address', 'Sconosciuto')
             is_read = email.get('isRead', False)
-            body = email.get('bodyPreview', '')
+            body_data = email.get('body', {})
+            
+            # body from html to text
+            if body_data.get('contentType') == 'html':
+                soup = BeautifulSoup(body_data.get('content', ''), 'html.parser')
+                body = soup.get_text(separator='\n')
+            else:
+                body = body_data.get('content', '')
 
             # toRecipients is a list
             recipients_data = email.get('toRecipients', [])
@@ -146,7 +155,7 @@ def fetch_emails(access_token, target_email, num_emails):
                 f"\n📮 A: {recipients_str}" \
                 f"\n📝 OGGETTO: {subject}" \
                 f"\n👁️  LETTA: {'✅ Sì' if {is_read} else '❌ No'}" \
-                f"\n📄 TESTO: {body}\n"
+                f"\n📄 TESTO: {body[:2000]}\n"
             msg += "-"*20
     else:
         msg += f"\n❌ API error: {response.status_code}" \
@@ -184,13 +193,15 @@ def email_reader(input_prompt, cat):
     return direct_output
 
 
-@tool(examples=["Di cosa parla l'ultima mail?", "Dimmi l'argomento dell'ultima mail ricevuta"])
-def email_classifier(input_prompt, cat):
+@tool(return_direct=True, examples=["Verifica se l'ultima mail parla di corsi di sicurezza", "Controlla se l'argomento dell'ultima mail riguarda un pacchetto di Microsoft"])
+def email_classifier(input_topic, cat):
     """
-    Return the argument of the last email received.
-    The input is a text prompt given by the user.
+    Return if the email text speaks about a certain topic.
+    Input must be a string specifying the topic to check in the last received email, for example: "input_topic"="corsi di sicurezza" or "input_topic"="pacchetto Microsoft".
     """
     
+    cat.send_ws_message(f"Verifico se l'argomento dell'ultima email ricevuta riguarda {input_topic}...")
+
     # build target email address from the username (if admin, use my email address)
     username = cat.user_data.name
     target_email = username if username!='admin' else 'matteo'
@@ -209,10 +220,40 @@ def email_classifier(input_prompt, cat):
     start = "TESTO: "
     end = "\n--------------------"
     email_text = last_email.split(start)[1].split(end)[0].strip()
-    print(email_text)
 
-    # describe the main argument of the email text with the LLM
-    # argument_output = cat.llm(f"Briefly describe the arguments of the following email text in italian language: {email_text}.")
-    argument_output = cat.llm(f"Descrivi brevemente i principali argomenti trattati nella seguente mail: {email_text}.")
+    prompt = f"""
+        Analizza la seguente email e dimmi se l'argomento principale riguarda: "{input_topic}".
+        
+        Testo dell'email:
+        "{email_text}"
 
-    return argument_output
+        Rispondi ESATTAMENTE solo con una parola: "SÌ" o "NO".
+    """
+    response = cat.llm(prompt)
+
+    if response.strip().upper() == "SÌ":
+        output = f"L'argomento principale dell'ultima email ricevuta riguarda {input_topic}."
+    else:
+        output = f"L'argomento principale dell'ultima email ricevuta NON riguarda {input_topic}."
+    
+    # send directly the output to the user via websocket if the tool is scheduled, otherwise return it as usual
+    jobs = cat.white_rabbit.get_jobs()
+    if jobs:
+        cat.send_ws_message(output, msg_type="chat")
+    
+    return output
+
+
+@tool(return_direct=True, examples=["Controlla se l'ultima mail parla di cartotecnica ogni 30 secondi", "Ogni 60 secondi, verifica se l'ultima mail riguarda i corsi di sicurezza"])
+def schedule_email_classifier(tool_input, cat):
+    """
+    This tool schedules the email_classifier tool to run every given seconds, checking if the last email received is about a certain topic.
+    Input must be an object with the topic to check and the interval in seconds, for example: {"topic": "corsi di sicurezza", "interval": 60}
+    """
+    input_obj = json.loads(tool_input)
+    topic = input_obj["topic"]
+    interval = input_obj["interval"]
+    
+    cat.white_rabbit.schedule_interval_job(job=email_classifier.run, seconds=int(interval), input_by_llm=topic, cat=cat)
+
+    return f"Schedulazione avviata: ogni {interval} secondi controllerò se l'ultima mail riguarda {topic}."

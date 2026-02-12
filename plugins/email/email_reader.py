@@ -3,6 +3,7 @@ import requests
 import sys
 import os
 import atexit
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 # load environment variables from .env file
@@ -97,7 +98,7 @@ def fetch_emails(access_token, target_email, num_emails=2):
     }
     params = {
         '$top': num_emails,
-        '$select': 'subject,from,toRecipients,receivedDateTime,bodyPreview,isRead',
+        '$select': 'subject,from,toRecipients,receivedDateTime,body,isRead',
         '$orderby': 'receivedDateTime desc'
     }
     # Microsoft Graph Endpoint to read all the emails
@@ -117,8 +118,15 @@ def fetch_emails(access_token, target_email, num_emails=2):
             subject = email.get('subject', 'Nessun oggetto')
             sender_name = email.get('from', {}).get('emailAddress', {}).get('name', 'Sconosciuto')
             sender_address = email.get('from', {}).get('emailAddress', {}).get('address', 'Sconosciuto')
-            preview = email.get('bodyPreview', '')
             is_read = email.get('isRead', False)
+            body_data = email.get('body', {})
+            
+            # body from html to text
+            if body_data.get('contentType') == 'html':
+                soup = BeautifulSoup(body_data.get('content', ''), 'html.parser')
+                body = soup.get_text(separator='\n')
+            else:
+                body = body_data.get('content', '')
 
             # toRecipients is a list
             recipients_data = email.get('toRecipients', [])
@@ -135,7 +143,7 @@ def fetch_emails(access_token, target_email, num_emails=2):
                 f"\n📮 A: {recipients_str}" \
                 f"\n📝 OGGETTO: {subject}" \
                 f"\n👁️  LETTA: {'✅ Sì' if {is_read} else '❌ No'}" \
-                f"\n📄 TESTO: {preview[:1000]}...\n"
+                f"\n📄 TESTO: {body}...\n"
             msg += "-"*40
     else:
         msg += f"\n❌ API error: {response.status_code}" \
