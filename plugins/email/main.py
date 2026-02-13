@@ -34,12 +34,12 @@ class DBSettings(BaseModel):
 def settings_model():
     return DBSettings()
 
+# -------------------------------------------------------------------------------------------------------------------------------------------
 
 def create_msal_app():
     """
     msal app used to configure cache file.
     """
-
     # creation of a serializable cache object
     cache = msal.SerializableTokenCache()
 
@@ -70,7 +70,6 @@ def get_access_token(app):
     """
     Authentication handler with cache
     """
-    
     # searchaing for token in the cache
     accounts = app.get_accounts()
     if accounts:
@@ -100,70 +99,80 @@ def get_access_token(app):
 
 # -------------------------------------------------------------------------------------------------------------------------------------------
 
+def format_emails(response):
+    """
+    Format the email data retrieved from the Microsoft Graph API into a readable string format.
+    """
+    emails = response.json().get('value', [])
+    format_output = f"\n📬 Last {len(emails)} emails:\n"
+    format_output += "-" * 20
+    
+    for i, email in enumerate(emails, 1):
+        date = email.get('receivedDateTime', '')
+        subject = email.get('subject', 'Nessun oggetto')
+        sender_name = email.get('from', {}).get('emailAddress', {}).get('name', 'Sconosciuto')
+        sender_address = email.get('from', {}).get('emailAddress', {}).get('address', 'Sconosciuto')
+        is_read = email.get('isRead', False)
+        body_data = email.get('body', {})
+        
+        # body from html to text
+        if body_data.get('contentType') == 'html':
+            soup = BeautifulSoup(body_data.get('content', ''), 'html.parser')
+            body = soup.get_text(separator='\n')
+        else:
+            body = body_data.get('content', '')
+
+        # toRecipients is a list
+        recipients_data = email.get('toRecipients', [])
+        if recipients_data:
+            recipients_list = [
+                r.get('emailAddress', {}).get('name') + ": " + r.get('emailAddress', {}).get('address') 
+                for r in recipients_data
+            ]
+        recipients_str = ", ".join(recipients_list) if recipients_list else "Nessuno"
+        
+        format_output += f"\n📧 Email {i}:" \
+            f"\n📅 DATA: {date}" \
+            f"\n👤 DA: {sender_name}: {sender_address}" \
+            f"\n📮 A: {recipients_str}" \
+            f"\n📝 OGGETTO: {subject}" \
+            f"\n👁️  LETTA: {'✅ Sì' if {is_read} else '❌ No'}" \
+            f"\n📄 TESTO: {body[:2000]}\n"
+        format_output += "-" * 20
+    
+    return format_output
+
+
 def fetch_emails(access_token, target_email, num_emails):
     """
     Fetching the latest emails from the target email address.
     """
-
     headers = {
         'Authorization': f'Bearer {access_token}',
         'Content-Type': 'application/json'
     }
+
     params = {
         '$top': num_emails,
         '$select': 'subject,from,toRecipients,receivedDateTime,body,isRead',
         '$orderby': 'receivedDateTime desc'
     }
-    # Microsoft Graph Endpoint to read all the emails
+
+    # Microsoft Graph Endpoint to read
+    # all the emails
     # graph_endpoint = 'https://graph.microsoft.com/v1.0/users/{target_email}/messages'
-    # only inbox
+    # only the inbox
     graph_endpoint = f'https://graph.microsoft.com/v1.0/users/{target_email}/mailFolders/inbox/messages'
 
     response = requests.get(graph_endpoint, headers=headers, params=params)
 
-    msg = ""
     if response.status_code == 200:
-        emails = response.json().get('value', [])
-        msg += f"\n📬 Last {len(emails)} emails:\n" + "-"*20
-        
-        for i, email in enumerate(emails, 1):
-            date = email.get('receivedDateTime', '')
-            subject = email.get('subject', 'Nessun oggetto')
-            sender_name = email.get('from', {}).get('emailAddress', {}).get('name', 'Sconosciuto')
-            sender_address = email.get('from', {}).get('emailAddress', {}).get('address', 'Sconosciuto')
-            is_read = email.get('isRead', False)
-            body_data = email.get('body', {})
-            
-            # body from html to text
-            if body_data.get('contentType') == 'html':
-                soup = BeautifulSoup(body_data.get('content', ''), 'html.parser')
-                body = soup.get_text(separator='\n')
-            else:
-                body = body_data.get('content', '')
-
-            # toRecipients is a list
-            recipients_data = email.get('toRecipients', [])
-            if recipients_data:
-                recipients_list = [
-                    r.get('emailAddress', {}).get('name') + ": " + r.get('emailAddress', {}).get('address') 
-                    for r in recipients_data
-                ]
-            recipients_str = ", ".join(recipients_list) if recipients_list else "Nessuno"
-            
-            msg += f"\n📧 Email {i}:" \
-                f"\n📅 DATA: {date}" \
-                f"\n👤 DA: {sender_name}: {sender_address}" \
-                f"\n📮 A: {recipients_str}" \
-                f"\n📝 OGGETTO: {subject}" \
-                f"\n👁️  LETTA: {'✅ Sì' if {is_read} else '❌ No'}" \
-                f"\n📄 TESTO: {body[:2000]}\n"
-            msg += "-"*20
+        format_output = format_emails(response)
+        return format_output
     else:
-        msg += f"\n❌ API error: {response.status_code}" \
+        error_msg = f"\n❌ API error: {response.status_code}" \
             f"\n{response.text}"
-
-    # return all the emails or the error message
-    return msg
+        return error_msg
 
 
 @tool(return_direct=True, examples=['Mostrami le ultime 5 mail', 'Quali sono le ultime 2 mail ricevute?'])
@@ -172,14 +181,19 @@ def email_reader(input_prompt, cat):
     Return the last emails received in the inbox of the email address specified in the plugin settings.
     The input is a text prompt given by the user that should specifies how many emails to retrieve.
     """
-    
+    cat.send_ws_message("Lettura email in corso...")
+
     # build target email address from the username (if admin, use my email address)
     username = cat.user_data.name
     target_email = username if username!='admin' else 'matteo'
     target_email += "@rewave.it"
-
+    
     # retrieve number of emails to fetch from the text query (default is 1)
-    num_emails = cat.llm(f"Extract the main number refferring to the quantity of emails to fetch from the following sentence: {input_prompt}. Answer ONLY with the number as an integer, without any additional text or punctuation. If you can't find any number, answer '1'.")
+    prompt = f"""
+        Extract the main number refferring to the quantity of emails to fetch from the following sentence: {input_prompt}.
+        Answer ONLY with the number as an integer, without any additional text or punctuation. If you can't find any number, answer '1'.
+    """
+    num_emails = cat.llm(prompt)
 
     # app with cache handling
     msal_app = create_msal_app()
@@ -224,6 +238,7 @@ def send_email(access_token, sender, to, subject, body):
 
     # Microsoft Graph Endpoint to send emails from the sender email address
     graph_endpoint = f'https://graph.microsoft.com/v1.0/users/{sender}/sendMail'
+
     response = requests.post(graph_endpoint, headers=headers, json=email_data)
 
     if response.status_code == 202:
@@ -239,7 +254,6 @@ def email_sender(input_prompt, cat):
     Input must be an object with the recipient email address, the subject and the body of the email,
     for example: {"to": "matteo@rewave.it"; "subject": "Saluti"; "body": "Ciao Matteo, come stai?"}
     """
-
     cat.send_ws_message("Invio email in corso...")
 
     input_obj = json.loads(input_prompt)
@@ -288,10 +302,12 @@ def email_classifier(input_topic, cat):
     if token:
         last_email = fetch_emails(token, target_email, 1)
 
+    # take only the email text from the output of fetch_emails
     start = "TESTO: "
     end = "\n--------------------"
     email_text = last_email.split(start)[1].split(end)[0].strip()
 
+    # create a prompt for the LLM to classify if the email text is about the input topic or not, and answer only with "SÌ" or "NO"
     prompt = f"""
         Analizza la seguente email e dimmi se l'argomento principale riguarda: "{input_topic}".
         
@@ -323,7 +339,6 @@ def schedule_email_classifier(tool_input, cat):
     This tool schedules the email_classifier tool to run every given seconds, checking if the last email received is about a certain topic.
     Input must be an object with the topic to check and the interval in seconds, for example: {"topic": "corsi di sicurezza", "interval": 60}
     """
-    
     input_obj = json.loads(tool_input)
     topic = input_obj["topic"]
     interval = input_obj["interval"]
