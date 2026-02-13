@@ -98,6 +98,7 @@ def get_access_token(app):
         print(f"❌ Error during authentication: {result.get('error')}")
         sys.exit(1)
 
+# -------------------------------------------------------------------------------------------------------------------------------------------
 
 def fetch_emails(access_token, target_email, num_emails):
     """
@@ -192,6 +193,77 @@ def email_reader(input_prompt, cat):
 
     return direct_output
 
+# -------------------------------------------------------------------------------------------------------------------------------------------
+
+def send_email(access_token, sender, to, subject, body):
+    """
+    This function sends an email with a given subject and body to a specified recipient.
+    """
+    headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+
+    email_data = {
+        "message": {
+            "subject": subject,
+            "body": {
+                "contentType": "Text",
+                "content": body
+            },
+            "toRecipients": [
+                {
+                    "emailAddress": {
+                        "address": to
+                    }
+                }
+            ]
+        },
+        "saveToSentItems": "true"
+    }
+
+    # Microsoft Graph Endpoint to send emails from the sender email address
+    graph_endpoint = f'https://graph.microsoft.com/v1.0/users/{sender}/sendMail'
+    response = requests.post(graph_endpoint, headers=headers, json=email_data)
+
+    if response.status_code == 202:
+        return f"✅ Email inviata con successo a {to}"
+    else:
+        return f"❌ Errore durante l'invio dell'email: {response.status_code} - {response.text}"
+
+
+@tool(return_direct=True, examples=['Invia una mail a matteo@rewave.it con oggetto "Saluti" chiedendogli come sta'])
+def email_sender(input_prompt, cat):
+    """
+    This tool sends an email with a given subject and body to a specified recipient.
+    Input must be an object with the recipient email address, the subject and the body of the email,
+    for example: {"to": "matteo@rewave.it"; "subject": "Saluti"; "body": "Ciao Matteo, come stai?"}
+    """
+
+    cat.send_ws_message("Invio email in corso...")
+
+    input_obj = json.loads(input_prompt)
+    to = input_obj["to"]
+    subject = input_obj["subject"]
+    body = input_obj["body"]
+
+    # build sender email address from the username (if admin, use my email address)
+    username = cat.user_data.name
+    sender_email = username if username!='admin' else 'matteo'
+    sender_email += "@rewave.it"
+
+    # app with cache handling
+    msal_app = create_msal_app()
+    
+    # getting the token
+    token = get_access_token(msal_app)
+
+    if token:
+        direct_output = send_email(token, sender_email, to, subject, body)
+    
+    return direct_output
+
+# -------------------------------------------------------------------------------------------------------------------------------------------
 
 @tool(return_direct=True, examples=["Verifica se l'ultima mail parla di corsi di sicurezza", "Controlla se l'argomento dell'ultima mail riguarda un pacchetto di Microsoft"])
 def email_classifier(input_topic, cat):
@@ -199,7 +271,6 @@ def email_classifier(input_topic, cat):
     Return if the email text speaks about a certain topic.
     Input must be a string specifying the topic to check in the last received email, for example: "input_topic"="corsi di sicurezza" or "input_topic"="pacchetto Microsoft".
     """
-    
     cat.send_ws_message(f"Verifico se l'argomento dell'ultima email ricevuta riguarda {input_topic}...")
 
     # build target email address from the username (if admin, use my email address)
@@ -213,7 +284,7 @@ def email_classifier(input_topic, cat):
     # getting the token
     token = get_access_token(msal_app)
     
-    # download emails
+    # download last email
     if token:
         last_email = fetch_emails(token, target_email, 1)
 
@@ -235,11 +306,13 @@ def email_classifier(input_topic, cat):
         output = f"L'argomento principale dell'ultima email ricevuta riguarda {input_topic}."
     else:
         output = f"L'argomento principale dell'ultima email ricevuta NON riguarda {input_topic}."
-    
-    # send directly the output to the user via websocket if the tool is scheduled, otherwise return it as usual
+
+    # send directly the output to the user via websocket if the tool is scheduled, otherwise send it via email
     jobs = cat.white_rabbit.get_jobs()
     if jobs:
         cat.send_ws_message(output, msg_type="chat")
+    else:
+        send_email(token, target_email, target_email, "Argomento ultima mail", output)
     
     return output
 
@@ -250,6 +323,7 @@ def schedule_email_classifier(tool_input, cat):
     This tool schedules the email_classifier tool to run every given seconds, checking if the last email received is about a certain topic.
     Input must be an object with the topic to check and the interval in seconds, for example: {"topic": "corsi di sicurezza", "interval": 60}
     """
+    
     input_obj = json.loads(tool_input)
     topic = input_obj["topic"]
     interval = input_obj["interval"]
