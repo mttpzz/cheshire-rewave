@@ -383,7 +383,9 @@ class EmailReplyForm(CatForm):
     ]
     
     stop_example = [
-        "Non voglio più mandare l'e-mail"
+        "Non voglio più mandare l'e-mail",
+        "Annulla l'invio dell'e-mail",
+        "Non inviare l'e-mail"
     ]
     
     ask_confirm = True
