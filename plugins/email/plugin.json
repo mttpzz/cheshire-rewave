@@ -1,7 +1,7 @@
 {
-    "name": "Mail handler",
-    "description": "Read and write email for Office365",
+    "name": "eMail handler",
+    "description": "Reading, classifing and writing emails",
     "author_name": "7pm",
-    "version": "0.1",
+    "version": "0.2",
     "tags": "email,outlook"
 }

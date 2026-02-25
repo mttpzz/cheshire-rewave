@@ -38,16 +38,6 @@ def settings_model():
 
 # -------------------------------------------------------------------------------------------------------------------------------------------
 
-@hook
-def agent_prompt_prefix(prefix, cat):
-    prefix = """
-        Sei l'assistente virtuale dell'azienda Rewave Srl e il tuo compito è quello di aiutare l'utente.
-        Parli in italiano e rispondi in modo educato e conciso.
-        """
-    return prefix
-
-# -------------------------------------------------------------------------------------------------------------------------------------------
-
 def create_msal_app():
     """
     msal app used to configure cache file.
@@ -187,8 +177,8 @@ def fetch_emails(access_token, email_address, num_emails):
         return error_msg
 
 
-# @tool(return_direct=True, examples=['Mostrami le ultime 5 mail', 'Quali sono le ultime 2 mail ricevute?'])
-# def email_reader(input_prompt, cat):
+@tool(return_direct=True, examples=['Leggi le ultime 5 mail', 'Quali sono le ultime 2 mail ricevute?'])
+def email_reader(input_prompt, cat):
     """
     Return the last emails received in the inbox of the email address specified in the plugin settings.
     The input is a text prompt given by the user that should specifies how many emails to retrieve.
@@ -362,6 +352,8 @@ def email_sender(input_prompt, cat):
 # -------------------------------------------------------------------------------------------------------------------------------------------
 
 class EmailReply(BaseModel):
+    topic: str
+    email_received: str
     sender_email: str
     target_email: str
     email_subject: str
@@ -449,7 +441,8 @@ class EmailReplyForm(CatForm):
         # if the response is "SÌ", create a proposed reply to the e-mail
         if response.strip().upper() == "SÌ":
             proposed_reply = self.cat.llm(f"""
-                Rispondi alla seguente email proponendo una risposta cordiale ed estremamente sintetica (una frase o qualche parola). Se la mail ricevuta non contiene domande o richieste, rispondi con una frase di cortesia senza aggiungere ulteriori informazioni.
+                Rispondi alla seguente email proponendo una risposta cordiale ed estremamente sintetica (una frase o qualche parola).
+                Se la mail ricevuta non contiene domande o richieste, rispondi con una frase di cortesia senza aggiungere ulteriori informazioni.
                 Inizia la risposta con "Buongiorno" e termina con "Cordiali saluti".
                 
                 Mail ricevuta:
@@ -457,37 +450,49 @@ class EmailReplyForm(CatForm):
             """)
         else:
             proposed_reply = ""
-        
+
         # model data population
+        self._model["topic"] = email_topic
+        self._model["email_received"] = email_text
         self._model["sender_email"] = sender_email
         self._model["target_email"] = target_email
         self._model["email_subject"] = f"Re: {email_subject}"
         self._model["email_text"] = proposed_reply
-
     
-    def message(self):
+    
+    def message(self):    
         # check if the form is closed
         if self._state == CatFormState.CLOSED:
             return {
                 "output": "Form chiuso e nessuna mail in coda da inviare."
             }
-
+        
+        # if the topic of the email is not relevant, don't propose a reply and close the form
+        if self._model['email_text'] == "":
+            return {
+                "output": f"L'argomento principale dell'ultima mail ricevuta NON riguarda {self._model['topic']}."
+            }
+        
         # initialize output with model data
-        out: str = f"📧 Email da inviare:" \
+        out: str = f"L'ultima mail ricevuta ha come argomento {self._model['topic']}." \
+            f"\n📧 Il testo della mail è:\n{self._model['email_received'][:200]}" \
+            f"\n ------------------------------------------------------------" \
+            f"\n Proposta di email da inviare come risposta:" \
             f"\n👤 DA: {self._model['sender_email']}" \
             f"\n📮 A: {self._model['target_email']}" \
             f"\n📝 OGGETTO: {self._model['email_subject']}" \
-            f"\n📄 TESTO: {self._model['email_text']}\n"
+            f"\n📄 TESTO: {self._model['email_text']}" \
+            f"\n ------------------------------------------------------------"
         
         # add missing fields
         missing_fields: List[str] = self._missing_fields
         if missing_fields:
-            out += f"I dati mancanti sono: {missing_fields}.\n"
+            out += f"\n I dati mancanti sono: {missing_fields}."
 
         # add errors
         errors: List[str] = self._errors
         if errors:
-            out += f"Questi dati non sono validi: {errors}.\n"
+            out += f"\n Questi dati non sono validi: {errors}.\n"
 
         # add confirmation message if needed
         if self._state == CatFormState.WAIT_CONFIRM:

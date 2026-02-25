@@ -1,0 +1,7 @@
+{
+    "name": "Web search",
+    "description": "Search on the web via DuckDuckGo",
+    "author_name": "7pm",
+    "version": "0.1",
+    "tags": "web,search,duckduckgo"
+}
