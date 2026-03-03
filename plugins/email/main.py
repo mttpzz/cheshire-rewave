@@ -1,4 +1,4 @@
-from cat.mad_hatter.decorators import tool, plugin, hook # type: ignore
+from cat.mad_hatter.decorators import tool  # type: ignore
 from cat.experimental.form import CatForm, CatFormState, form   # type: ignore
 from pydantic import BaseModel
 from typing import List
@@ -11,14 +11,14 @@ from bs4 import BeautifulSoup
 import json
 from dotenv import load_dotenv
 
+
+# --- ENV VARIABLES -------------------------------------------------------------------------------------------------------------
 # load environment variables from .env file
 load_dotenv()
 
 CLIENT_ID = os.getenv('CLIENT_ID')
 CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 TENANT_ID = os.getenv('TENANT_ID')  # 'common' if multitenant
-
-EMAIL_ADDRESS = os.getenv('EMAIL_ADDRESS')
 
 # permissions (Scope)
 SCOPES = ['Mail.Read', 'Mail.ReadWrite']
@@ -28,16 +28,7 @@ AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 CACHE_FILE = "/app/cat/plugins/email/token_cache.bin"
 
 
-# settings class for the plugin
-class DBSettings(BaseModel):
-    email_address: str = EMAIL_ADDRESS
-
-@plugin
-def settings_model():
-    return DBSettings()
-
-# -------------------------------------------------------------------------------------------------------------------------------------------
-
+# --- CACHE FILE ----------------------------------------------------------------------------------------------------------------
 def create_msal_app():
     """
     msal app used to configure cache file.
@@ -99,8 +90,8 @@ def get_access_token(app):
         print(f"❌ Error during authentication: {result.get('error')}")
         sys.exit(1)
 
-# -------------------------------------------------------------------------------------------------------------------------------------------
 
+# --- FETCHING AND FORMATTING EMAILS --------------------------------------------------------------------------------------------
 def format_emails(response):
     """
     Format the email data retrieved from the Microsoft Graph API into a readable string format.
@@ -177,6 +168,7 @@ def fetch_emails(access_token, email_address, num_emails):
         return error_msg
 
 
+# --- EMAIL: READ ---------------------------------------------------------------------------------------------------------------
 @tool(return_direct=True, examples=['Leggi le ultime 5 mail', 'Quali sono le ultime 2 mail ricevute?'])
 def email_reader(input_prompt, cat):
     """
@@ -185,32 +177,36 @@ def email_reader(input_prompt, cat):
     """
     cat.send_ws_message("Lettura email in corso...")
 
-    # build target email address from the username (if admin, use my email address)
-    username = cat.user_data.name
-    email_address = username if username!='admin' else 'matteo'
-    email_address += "@rewave.it"
-    
-    # retrieve number of emails to fetch from the text query (default is 1)
-    prompt = f"""
-        Extract the main number refferring to the quantity of emails to fetch from the following sentence: {input_prompt}.
-        Answer ONLY with the number as an integer, without any additional text or punctuation. If you can't find any number, answer '1'.
-    """
-    num_emails = cat.llm(prompt)
+    try:
+        # get email address from settings
+        settings = cat.mad_hatter.get_plugin().load_settings()
+        email_address = settings['email_address']
+        if not email_address:
+            return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
+        
+        # retrieve number of emails to fetch from the text query (default is 1)
+        prompt = f"""
+            Extract the main number refferring to the quantity of emails to fetch from the following sentence: {input_prompt}.
+            Answer ONLY with the number as an integer, without any additional text or punctuation. If you can't find any number, answer '1'.
+        """
+        num_emails = cat.llm(prompt)
 
-    # app with cache handling
-    msal_app = create_msal_app()
-    
-    # getting the token
-    token = get_access_token(msal_app)
-    
-    # download emails
-    if token:
-        direct_output = fetch_emails(token, email_address, num_emails)
+        # app with cache handling
+        msal_app = create_msal_app()
+        
+        # getting the token
+        token = get_access_token(msal_app)
+        
+        # download emails
+        if token:
+            direct_output = fetch_emails(token, email_address, num_emails)
+    except Exception as e:
+        return f"❌ Errore durante il recupero delle mail: {str(e)}"
 
     return direct_output
 
-# -------------------------------------------------------------------------------------------------------------------------------------------
 
+# --- EMAIL: WRITE --------------------------------------------------------------------------------------------------------------
 def send_email(access_token, sender, to, subject, body):
     """
     This function sends an email with a given subject and body to a specified recipient.
@@ -253,7 +249,7 @@ def send_email(access_token, sender, to, subject, body):
 def email_sender(input_prompt, cat):
     """
     This tool sends an email with a given subject and body to a specified recipient.
-    Input must be an object with the recipient email address, the subject and the body of the email,
+    Input MUST be an object with the recipient email address, the subject and the body of the email,
     for example: {"to": "matteo@rewave.it"; "subject": "Saluti"; "body": "Ciao Matteo, come stai?"}
     """
     cat.send_ws_message("Invio email in corso...")
@@ -262,11 +258,12 @@ def email_sender(input_prompt, cat):
     to = input_obj["to"]
     subject = input_obj["subject"]
     body = input_obj["body"]
-
-    # build sender email address from the username (if admin, use my email address)
-    username = cat.user_data.name
-    sender_email = username if username!='admin' else 'matteo'
-    sender_email += "@rewave.it"
+    
+    # get email address from settings
+    settings = cat.mad_hatter.get_plugin().load_settings()
+    sender_email = settings['email_address']
+    if not sender_email:
+        return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
 
     # app with cache handling
     msal_app = create_msal_app()
@@ -279,20 +276,21 @@ def email_sender(input_prompt, cat):
     
     return direct_output
 
-# -------------------------------------------------------------------------------------------------------------------------------------------
 
+# --- EMAIL: CLASSIFY -----------------------------------------------------------------------------------------------------------
 # @tool(return_direct=True, examples=["Verifica se l'ultima mail parla di corsi di sicurezza", "Controlla se l'argomento dell'ultima mail riguarda un pacchetto di Microsoft"])
 # def email_classifier(input_topic, cat):
     """
     Return if the email text speaks about a certain topic.
-    Input must be a string specifying the topic to check in the last received email, for example: "input_topic"="corsi di sicurezza" or "input_topic"="pacchetto Microsoft".
+    Input MUST be a string specifying the topic to check in the last received email, for example: "input_topic"="corsi di sicurezza" or "input_topic"="pacchetto Microsoft".
     """
     cat.send_ws_message(f"Verifico se l'argomento dell'ultima email ricevuta riguarda {input_topic}...")
 
-    # build target email address from the username (if admin, use my email address)
-    username = cat.user_data.name
-    target_email = username if username!='admin' else 'matteo'
-    target_email += "@rewave.it"
+    # get email address from settings
+    settings = cat.mad_hatter.get_plugin().load_settings()
+    target_email = settings['email_address']
+    if not target_email:
+        return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
 
     # app with cache handling
     msal_app = create_msal_app()
@@ -339,7 +337,7 @@ def email_sender(input_prompt, cat):
 # def schedule_email_classifier(tool_input, cat):
     """
     This tool schedules the email_classifier tool to run every given seconds, checking if the last email received is about a certain topic.
-    Input must be an object with the topic to check and the interval in seconds, for example: {"topic": "corsi di sicurezza", "interval": 60}
+    Input MUST be an object with the topic to check and the interval in seconds, for example: {"topic": "corsi di sicurezza", "interval": 60}
     """
     input_obj = json.loads(tool_input)
     topic = input_obj["topic"]
@@ -349,8 +347,8 @@ def email_sender(input_prompt, cat):
 
     return f"Schedulazione avviata: ogni {interval} secondi controllerò se l'ultima mail riguarda {topic}."
 
-# -------------------------------------------------------------------------------------------------------------------------------------------
 
+# --- EMAIL: REPLY FORM ---------------------------------------------------------------------------------------------------------
 class EmailReply(BaseModel):
     topic: str
     email_received: str
@@ -398,10 +396,11 @@ class EmailReplyForm(CatForm):
             Se non riesci a identificare un topic, rispondi "Nessun topic identificato".
         """)
 
-        # get sender e-mail address from the username (if admin, use my e-mail address)
-        username = cat.user_data.name
-        sender_email = username if username!='admin' else 'matteo'
-        sender_email += "@rewave.it"
+        # get email address from settings
+        settings = cat.mad_hatter.get_plugin().load_settings()
+        sender_email = settings['email_address']
+        if not sender_email:
+            sender_email = "Non trovato"
 
         # app with cache handling
         msal_app = create_msal_app()
@@ -471,6 +470,12 @@ class EmailReplyForm(CatForm):
         if self._model['email_text'] == "":
             return {
                 "output": f"L'argomento principale dell'ultima mail ricevuta NON riguarda {self._model['topic']}."
+            }
+        
+        # if no sender email found in settings
+        if self._model['sender_email'] == "Non trovato":
+            return {
+                "output": "Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
             }
         
         # initialize output with model data

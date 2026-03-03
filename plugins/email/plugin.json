@@ -1,7 +1,7 @@
 {
-    "name": "eMail handler",
-    "description": "Reading, classifing and writing emails",
+    "name": "Mail Manager",
+    "description": "Reading, writing emails and reply based on the argument",
     "author_name": "7pm",
-    "version": "0.2",
-    "tags": "email,outlook"
+    "version": "0.3",
+    "tags": "email,outlook,read,write,reply,form"
 }

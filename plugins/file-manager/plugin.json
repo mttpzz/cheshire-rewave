@@ -1,0 +1,7 @@
+{
+    "name": "File Manager",
+    "description": "Create, write, read, rename, delete and list files in TXT, PDF or Word format based on what the user need.",
+    "author_name": "7pm",
+    "version": "0.2",
+    "tags": "file,pdf,word,txt,read,write,list,rename,delete"
+}

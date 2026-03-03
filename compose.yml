@@ -13,3 +13,4 @@ services:
       - ./plugins:/app/cat/plugins
       - /app/cat/plugins/vanna/training # exclude folder vanna/training from docker
       - ./data:/app/cat/data
+      - C:/temp:/app/cat/temp
