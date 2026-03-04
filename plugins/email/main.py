@@ -246,18 +246,22 @@ def send_email(access_token, sender, to, subject, body):
 
 
 @tool(return_direct=True, examples=['Invia una mail a matteo@rewave.it con oggetto "Saluti" chiedendogli come sta'])
-def email_sender(input_prompt, cat):
+def email_sender(input_json, cat):
     """
     This tool sends an email with a given subject and body to a specified recipient.
-    Input MUST be an object with the recipient email address, the subject and the body of the email,
-    for example: {"to": "matteo@rewave.it"; "subject": "Saluti"; "body": "Ciao Matteo, come stai?"}
+    The input MUST be a Python dictionary which contains the recipient email address, the subject and the body of the email,
+    for example: {"to": "matteo@rewave.it", "subject": "Saluti", "body": "Ciao Matteo, come stai?"}
     """
     cat.send_ws_message("Invio email in corso...")
 
-    input_obj = json.loads(input_prompt)
-    to = input_obj["to"]
-    subject = input_obj["subject"]
-    body = input_obj["body"]
+    # parsing input
+    try:
+        input_data = json.loads(input_json) if isinstance(input_json, str) else input_json
+        to = input_data.get("to", "").lower().strip()
+        subject = input_data.get("subject", "Nessun oggetto")
+        body = input_data.get("body", "")
+    except Exception as e:
+        return f"❌ Errore nel formato dei dati: {str(e)}."
     
     # get email address from settings
     settings = cat.mad_hatter.get_plugin().load_settings()
@@ -265,15 +269,19 @@ def email_sender(input_prompt, cat):
     if not sender_email:
         return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
 
-    # app with cache handling
-    msal_app = create_msal_app()
-    
-    # getting the token
-    token = get_access_token(msal_app)
+    try:
+        # app with cache handling
+        msal_app = create_msal_app()
+        
+        # getting the token
+        token = get_access_token(msal_app)
 
-    if token:
+        # sending email
         direct_output = send_email(token, sender_email, to, subject, body)
-    
+
+    except Exception as e:
+        return f"❌ Problema con l'invio della mail: {str(e)}. Riprova."
+
     return direct_output
 
 

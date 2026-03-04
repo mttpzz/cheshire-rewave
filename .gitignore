@@ -1,3 +1,6 @@
+# installed plugin (not created by me)
+plugins/cat_advanced_tools/*
+
 # token file
 token_cache.bin
 

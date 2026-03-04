@@ -2,6 +2,6 @@
     "name": "Mail Manager",
     "description": "Reading, writing emails and reply based on the argument",
     "author_name": "7pm",
-    "version": "0.3",
+    "version": "0.3.0",
     "tags": "email,outlook,read,write,reply,form"
 }

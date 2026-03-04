@@ -8,7 +8,7 @@ from docx import Document
 
 
 BASE_FOLDER_CAT = "cat/temp"
-BASE_FOLDER_USER = "C:/cheshire"
+BASE_FOLDER_USER = "C:/Cheshire"
 
 # Security and utility function to manage user paths safely (Path traversal prevention)
 def get_user_path(cat, folder, filename=None):
@@ -29,9 +29,9 @@ def get_user_path(cat, folder, filename=None):
 @tool(return_direct=True, examples=["Creami un pdf con il riassunto del documento che ti ho inviato.", "Voglio un file Word che riassuma la nostra conversazione."])
 def create_file(input_json, cat):
     """
-        This tool create or write a file in a specific folder for the user and return the folder in which the file is saved.
-        The input MUST be an object which contains the text to be included in the file, the format of the file (word, pdf or txt) and the name of the file (optional, if not provided it will be generated with a timestamp),
-        for example: {"text": "Questo è il testo da inserire nel documento."; "format": "pdf"; "filename": "riassunto"}
+    This tool create or write a file in a specific folder for the user and return the folder in which the file is saved.
+    The input MUST be a Python dictionary which contains the text to be included in the file, the format of the file (word, pdf or txt) and the name of the file (optional, if not provided it will be generated with a timestamp),
+    for example: {"text": "Questo è il testo da inserire nel documento.", "format": "pdf", "filename": "riassunto"}
     """
     
     # parsing input
@@ -42,7 +42,7 @@ def create_file(input_json, cat):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_name = data.get("filename", f"doc_{timestamp}")
     except Exception as e:
-        return f"Errore nel formato dei dati: {str(e)}."
+        return f"❌ Errore nel formato dei dati: {str(e)}."
     
     # file creation
     try:
