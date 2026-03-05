@@ -14,3 +14,4 @@ services:
       - /app/cat/plugins/vanna/training # exclude folder vanna/training from docker
       - ./data:/app/cat/data
       - C:/Cheshire:/app/cat/temp # folder to manage user files
+      - ./logs:/app/cat/logs  # logs folder

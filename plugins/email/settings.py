@@ -1,7 +1,13 @@
+from cat.logs.cat_logger import get_plugin_logger     # type: ignore
 from cat.mad_hatter.decorators import plugin, hook  # type: ignore
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
+
+
+# --- LOGGER --------------------------------------------------------------------------------------------------------------------
+# start the logger with its plugin name
+log = get_plugin_logger("email")
 
 
 # --- ENV VARIABLES -------------------------------------------------------------------------------------------------------------
@@ -35,4 +41,4 @@ def after_cat_bootstrap(cat):
         # writing data inside settings.json
         plugin.save_settings(current_settings)
         
-        print(f"✅ Impostazioni del plugin ***{plugin_id}*** salvate in automatico!")
+        log.info(f"✅ Impostazioni del plugin ***{plugin_id}*** salvate in automatico!")

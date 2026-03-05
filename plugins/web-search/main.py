@@ -1,7 +1,14 @@
+from cat.logs.cat_logger import get_plugin_logger     # type: ignore
 from cat.mad_hatter.decorators import tool  # type: ignore
 from ddgs import DDGS
 
 
+# --- LOGGER --------------------------------------------------------------------------------------------------------------------
+# start the logger with its plugin name
+log = get_plugin_logger("web-search")
+
+
+# --- TOOL: WEB SEARCH ----------------------------------------------------------------------------------------------------------
 @tool(examples=["Cerca sul web", "Cerca su internet", "Cerca online"])
 def web_search(input_query, cat):
     """
@@ -10,14 +17,15 @@ def web_search(input_query, cat):
     Use this tool also every time the user asks to search something on the web or if the user asks about recent news.
     The input is the query string.
     """
-    
+    log.info("Starting web-search plugin.")
     cat.send_ws_message(content=f"Ricerca sul web in corso...")
 
     try:
         # web search using only first 5 results
         results = DDGS().text(input_query, max_results=5)
         if not results:
-            return f"Non ho trovato risultati recenti per '{input_query}'."
+            log.warning("⚠️ No results found.")
+            return f"⚠️ Non ho trovato risultati recenti per '{input_query}'."
 
         # formatting data
         formatted_results = "Ecco cosa ho trovato sul web:\n\n"
@@ -29,5 +37,5 @@ def web_search(input_query, cat):
         return formatted_results
 
     except Exception as e:
-        print(f"Errore durante la ricerca: {e}")
+        log.error(f"❌ Error during web search: {str(e)}")
         return "❌ Al momento non riesco a collegarmi a internet per effettuare la ricerca. Riprova più tardi."

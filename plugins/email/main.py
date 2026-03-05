@@ -1,3 +1,4 @@
+from cat.logs.cat_logger import get_plugin_logger     # type: ignore
 from cat.mad_hatter.decorators import tool  # type: ignore
 from cat.experimental.form import CatForm, CatFormState, form   # type: ignore
 from pydantic import BaseModel
@@ -10,6 +11,11 @@ import atexit
 from bs4 import BeautifulSoup
 import json
 from dotenv import load_dotenv
+
+
+# --- LOGGER --------------------------------------------------------------------------------------------------------------------
+# start the logger with its plugin name
+log = get_plugin_logger("email")
 
 
 # --- ENV VARIABLES -------------------------------------------------------------------------------------------------------------
@@ -28,7 +34,7 @@ AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 CACHE_FILE = "/app/cat/plugins/email/token_cache.bin"
 
 
-# --- CACHE FILE ----------------------------------------------------------------------------------------------------------------
+# --- CACHE AND TOKEN -----------------------------------------------------------------------------------------------------------
 def create_msal_app():
     """
     msal app used to configure cache file.
@@ -68,30 +74,31 @@ def get_access_token(app):
     if accounts:
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
         if result:
-            print("✅ Token found in the cache (No login required).")
+            log.info("✅ Token found in the cache (No login required).")
             return result['access_token']
 
     # if no token found, start device flow
-    print("⚠️ No token found. Login...")
+    log.warning("⚠️ No token found. Login...")
     
     flow = app.initiate_device_flow(scopes=SCOPES)
     if 'user_code' not in flow:
+        log.error("❌ Can't create Device Flow.")
         raise ValueError("Can't create Device Flow.")
 
-    print(f"\n👉 Login page: {flow['verification_uri']}")
-    print(f"👉 Insert the following code: {flow['user_code']}\n")
+    log.warning(f"👉 Login page: {flow['verification_uri']}")
+    log.warning(f"👉 Insert the following code: {flow['user_code']}\n")
     
     result = app.acquire_token_by_device_flow(flow)
 
     if 'access_token' in result:
-        print("✅ Authentication done! Token saved.")
+        log.warning("✅ Authentication done! Token saved.")
         return result['access_token']
     else:
-        print(f"❌ Error during authentication: {result.get('error')}")
+        log.error(f"❌ Error during authentication: {result.get('error')}")
         sys.exit(1)
 
 
-# --- FETCHING AND FORMATTING EMAILS --------------------------------------------------------------------------------------------
+# --- FORMATTING, FETCHING AND SENDING EMAILS -----------------------------------------------------------------------------------
 def format_emails(response):
     """
     Format the email data retrieved from the Microsoft Graph API into a readable string format.
@@ -150,63 +157,25 @@ def fetch_emails(access_token, email_address, num_emails):
         '$select': 'subject,from,toRecipients,receivedDateTime,body,isRead',
         '$orderby': 'receivedDateTime desc'
     }
-
+    
     # Microsoft Graph Endpoint to read
-    # all the emails
-    # graph_endpoint = 'https://graph.microsoft.com/v1.0/users/{email_address}/messages'
-    # only the inbox
-    graph_endpoint = f'https://graph.microsoft.com/v1.0/users/{email_address}/mailFolders/inbox/messages'
-
-    response = requests.get(graph_endpoint, headers=headers, params=params)
-
-    if response.status_code == 200:
-        format_output = format_emails(response)
-        return format_output
-    else:
-        error_msg = f"\n❌ API error: {response.status_code}" \
-            f"\n{response.text}"
-        return error_msg
-
-
-# --- EMAIL: READ ---------------------------------------------------------------------------------------------------------------
-@tool(return_direct=True, examples=['Leggi le ultime 5 mail', 'Quali sono le ultime 2 mail ricevute?'])
-def email_reader(input_prompt, cat):
-    """
-    Return the last emails received in the inbox of the email address specified in the plugin settings.
-    The input is a text prompt given by the user that should specifies how many emails to retrieve.
-    """
-    cat.send_ws_message("Lettura email in corso...")
+    # graph_endpoint = 'https://graph.microsoft.com/v1.0/users/{email_address}/messages'    # all the emails
+    graph_endpoint = f'https://graph.microsoft.com/v1.0/users/{email_address}/mailFolders/inbox/messages'   # only the inbox
 
     try:
-        # get email address from settings
-        settings = cat.mad_hatter.get_plugin().load_settings()
-        email_address = settings['email_address']
-        if not email_address:
-            return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
+        response = requests.get(graph_endpoint, headers=headers, params=params)
         
-        # retrieve number of emails to fetch from the text query (default is 1)
-        prompt = f"""
-            Extract the main number refferring to the quantity of emails to fetch from the following sentence: {input_prompt}.
-            Answer ONLY with the number as an integer, without any additional text or punctuation. If you can't find any number, answer '1'.
-        """
-        num_emails = cat.llm(prompt)
+        # Raise an exception if status code is one of the unsuccess codes (401, 403, 500, etc.)
+        # NB: 202 (Accepted) is a success code
+        response.raise_for_status()
 
-        # app with cache handling
-        msal_app = create_msal_app()
-        
-        # getting the token
-        token = get_access_token(msal_app)
-        
-        # download emails
-        if token:
-            direct_output = fetch_emails(token, email_address, num_emails)
-    except Exception as e:
-        return f"❌ Errore durante il recupero delle mail: {str(e)}"
-
-    return direct_output
+        return format_emails(response)
+    
+    except requests.exceptions.RequestException as e:
+        log.error(f"❌ Error in fetching mails: {str(e)}")
+        return f"❌ Errore durante l'accesso alla casella di posta. Riprova."
 
 
-# --- EMAIL: WRITE --------------------------------------------------------------------------------------------------------------
 def send_email(access_token, sender, to, subject, body):
     """
     This function sends an email with a given subject and body to a specified recipient.
@@ -237,14 +206,52 @@ def send_email(access_token, sender, to, subject, body):
     # Microsoft Graph Endpoint to send emails from the sender email address
     graph_endpoint = f'https://graph.microsoft.com/v1.0/users/{sender}/sendMail'
 
-    response = requests.post(graph_endpoint, headers=headers, json=email_data)
+    try:
+        response = requests.post(graph_endpoint, headers=headers, json=email_data)
 
-    if response.status_code == 202:
+        # Raise an exception if status code is one of the unsuccess codes (401, 403, 500, etc.)
+        # NB: 202 (Accepted) is a success code
+        response.raise_for_status()
+
         return f"✅ Email inviata con successo a {to}"
-    else:
-        return f"❌ Errore durante l'invio dell'email: {response.status_code} - {response.text}"
+    
+    except requests.exceptions.RequestException as e:
+        log.error(f"❌ Error in sending mails: {str(e)}")
+        return f"❌ Errore durante l'invio della mail. Riprova."
 
 
+# --- TOOL: EMAIL READ ----------------------------------------------------------------------------------------------------------
+@tool(return_direct=True, examples=['Leggi le ultime 5 mail', 'Quali sono le ultime 2 mail ricevute?'])
+def email_reader(input_prompt, cat):
+    """
+    Return the last emails received in the inbox of the email address specified in the plugin settings.
+    The input is a text prompt given by the user that should specifies how many emails to retrieve.
+    """
+    log.info("Starting reading mail plugin.")
+    cat.send_ws_message("Lettura email in corso...")
+
+    # get email address from settings
+    settings = cat.mad_hatter.get_plugin().load_settings()
+    email_address = settings['email_address']
+    if not email_address:
+        return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
+    
+    # retrieve number of emails to fetch from the text query (default is 1)
+    prompt = f"""
+        Extract the main number refferring to the quantity of emails to fetch from the following sentence: {input_prompt}.
+        Answer ONLY with the number as an integer, without any additional text or punctuation. If you can't find any number, answer '1'.
+    """
+    num_emails = cat.llm(prompt)
+
+    # download emails
+    msal_app = create_msal_app()
+    token = get_access_token(msal_app)
+    direct_output = fetch_emails(token, email_address, num_emails)
+
+    return direct_output
+
+
+# --- TOOL: EMAIL WRITE ---------------------------------------------------------------------------------------------------------
 @tool(return_direct=True, examples=['Invia una mail a matteo@rewave.it con oggetto "Saluti" chiedendogli come sta'])
 def email_sender(input_json, cat):
     """
@@ -252,6 +259,7 @@ def email_sender(input_json, cat):
     The input MUST be a Python dictionary which contains the recipient email address, the subject and the body of the email,
     for example: {"to": "matteo@rewave.it", "subject": "Saluti", "body": "Ciao Matteo, come stai?"}
     """
+    log.info("Starting sending mail plugin.")
     cat.send_ws_message("Invio email in corso...")
 
     # parsing input
@@ -261,7 +269,8 @@ def email_sender(input_json, cat):
         subject = input_data.get("subject", "Nessun oggetto")
         body = input_data.get("body", "")
     except Exception as e:
-        return f"❌ Errore nel formato dei dati: {str(e)}."
+        log.error(f"❌ Error while parsing input: {str(e)}.")
+        return f"❌ Errore nel formato dei dati. Riprova."
     
     # get email address from settings
     settings = cat.mad_hatter.get_plugin().load_settings()
@@ -269,23 +278,15 @@ def email_sender(input_json, cat):
     if not sender_email:
         return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
 
-    try:
-        # app with cache handling
-        msal_app = create_msal_app()
-        
-        # getting the token
-        token = get_access_token(msal_app)
-
-        # sending email
-        direct_output = send_email(token, sender_email, to, subject, body)
-
-    except Exception as e:
-        return f"❌ Problema con l'invio della mail: {str(e)}. Riprova."
+    # sending email
+    msal_app = create_msal_app()
+    token = get_access_token(msal_app)
+    direct_output = send_email(token, sender_email, to, subject, body)
 
     return direct_output
 
 
-# --- EMAIL: CLASSIFY -----------------------------------------------------------------------------------------------------------
+# --- TOOL: EMAIL CLASSIFY ------------------------------------------------------------------------------------------------------
 # @tool(return_direct=True, examples=["Verifica se l'ultima mail parla di corsi di sicurezza", "Controlla se l'argomento dell'ultima mail riguarda un pacchetto di Microsoft"])
 # def email_classifier(input_topic, cat):
     """
@@ -300,15 +301,10 @@ def email_sender(input_json, cat):
     if not target_email:
         return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
 
-    # app with cache handling
+    # download the last email
     msal_app = create_msal_app()
-    
-    # getting the token
     token = get_access_token(msal_app)
-    
-    # download last email
-    if token:
-        last_email = fetch_emails(token, target_email, 1)
+    last_email = fetch_emails(token, target_email, 1)
 
     # take only the email text from the output of fetch_emails
     start = "TESTO: "
@@ -356,7 +352,7 @@ def email_sender(input_json, cat):
     return f"Schedulazione avviata: ogni {interval} secondi controllerò se l'ultima mail riguarda {topic}."
 
 
-# --- EMAIL: REPLY FORM ---------------------------------------------------------------------------------------------------------
+# --- FORM: EMAIL REPLY ---------------------------------------------------------------------------------------------------------
 class EmailReply(BaseModel):
     topic: str
     email_received: str
@@ -391,6 +387,8 @@ class EmailReplyForm(CatForm):
     def __init__(self, cat):
         super().__init__(cat)
 
+        log.info("Starting reply form plugin.")
+
         # get topic of the email to reply to from the first user prompt
         first_user_prompt = cat.working_memory.user_message_json.text
         email_topic = cat.llm(f"""Analizza la seguente frase e estrai l'argomento da verificare nelle e-mail (topic).
@@ -409,16 +407,11 @@ class EmailReplyForm(CatForm):
         sender_email = settings['email_address']
         if not sender_email:
             sender_email = "Non trovato"
-
-        # app with cache handling
+        
+        # download the last email
         msal_app = create_msal_app()
-        
-        # getting the token
         token = get_access_token(msal_app)
-        
-        # download the last e-mail
-        if token:
-            last_email = fetch_emails(token, sender_email, 1)
+        last_email = fetch_emails(token, sender_email, 1)
 
         # take the sender email address from the last email which is the target of the reply
         start_target = "👤 DA: "
@@ -470,21 +463,15 @@ class EmailReplyForm(CatForm):
     def message(self):    
         # check if the form is closed
         if self._state == CatFormState.CLOSED:
-            return {
-                "output": "Form chiuso e nessuna mail in coda da inviare."
-            }
+            return {"output": "Form chiuso e nessuna mail in coda da inviare."}
         
         # if the topic of the email is not relevant, don't propose a reply and close the form
         if self._model['email_text'] == "":
-            return {
-                "output": f"L'argomento principale dell'ultima mail ricevuta NON riguarda {self._model['topic']}."
-            }
+            return {"output": f"L'argomento principale dell'ultima mail ricevuta NON riguarda {self._model['topic']}."}
         
         # if no sender email found in settings
         if self._model['sender_email'] == "Non trovato":
-            return {
-                "output": "Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
-            }
+            return {"output": "❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."}
         
         # initialize output with model data
         out: str = f"L'ultima mail ricevuta ha come argomento {self._model['topic']}." \
@@ -511,22 +498,13 @@ class EmailReplyForm(CatForm):
         if self._state == CatFormState.WAIT_CONFIRM:
             out += "\n --> Posso procedere a inviare l'e-mail?"
 
-        return {
-            "output": out
-        }
+        return {"output": out}
 
 
     def submit(self, form_data):
-        # app with cache handling
+        # sending the email
         msal_app = create_msal_app()
-        
-        # getting the token
         token = get_access_token(msal_app)
+        send_email(token, form_data["sender_email"], "matteo@rewave.it", form_data["email_subject"], form_data["email_text"])   # TODO change target email with form_data["target_email"]
         
-        # send email
-        if token:
-            send_email(token, form_data["sender_email"], "matteo@rewave.it", form_data["email_subject"], form_data["email_text"])   # TODO change target email with form_data["target_email"]
-        
-        return {
-            "output": "✅ Email inviata!"
-        }
+        return {"output": "✅ Email inviata!"}

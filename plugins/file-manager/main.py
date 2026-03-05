@@ -1,3 +1,4 @@
+from cat.logs.cat_logger import get_plugin_logger     # type: ignore
 from cat.mad_hatter.decorators import tool  # type: ignore
 import os
 import json
@@ -7,6 +8,12 @@ from pypdf import PdfReader
 from docx import Document
 
 
+# --- LOGGER --------------------------------------------------------------------------------------------------------------------
+# start the logger with its plugin name
+log = get_plugin_logger("file-manager")
+
+
+# --- LOCAL FOLDER MANAGER ------------------------------------------------------------------------------------------------------
 BASE_FOLDER_CAT = "cat/temp"
 BASE_FOLDER_USER = "C:/Cheshire"
 
@@ -25,7 +32,7 @@ def get_user_path(cat, folder, filename=None):
     return base_path
 
 
-# --- TOOL: WRITE -----------------------------------------------------------------------------------------------------
+# --- TOOL: FILE WRITE ----------------------------------------------------------------------------------------------------------
 @tool(return_direct=True, examples=["Creami un pdf con il riassunto del documento che ti ho inviato.", "Voglio un file Word che riassuma la nostra conversazione."])
 def create_file(input_json, cat):
     """
@@ -33,7 +40,8 @@ def create_file(input_json, cat):
     The input MUST be a Python dictionary which contains the text to be included in the file, the format of the file (word, pdf or txt) and the name of the file (optional, if not provided it will be generated with a timestamp),
     for example: {"text": "Questo è il testo da inserire nel documento.", "format": "pdf", "filename": "riassunto"}
     """
-    
+    log.info("Starting file writing tool.")
+
     # parsing input
     try:
         data = json.loads(input_json) if isinstance(input_json, str) else input_json
@@ -42,7 +50,8 @@ def create_file(input_json, cat):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_name = data.get("filename", f"doc_{timestamp}")
     except Exception as e:
-        return f"❌ Errore nel formato dei dati: {str(e)}."
+        log.error(f"❌ Error while parsing input: {str(e)}.")
+        return f"❌ Errore nel formato dei dati. Riprova."
     
     # file creation
     try:
@@ -70,8 +79,10 @@ def create_file(input_json, cat):
 
             with open(full_path, "w", encoding="utf-8") as f:
                 f.write(file_text)
+    
     except Exception as e:
-        return f"Errore durante la creazione del file: {str(e)}"
+        log.error(f"❌ Error during file creation: {str(e)}.")
+        return f"❌ Errore durante la creazione del file. Riprova."
 
     # folder for file access
     user_path = get_user_path(cat, BASE_FOLDER_USER)
@@ -80,13 +91,15 @@ def create_file(input_json, cat):
     return f"✅ Fatto! Puoi vedere il file **{file_name}** in questa cartella: {user_path_link}"
 
 
-# --- TOOL: LIST ------------------------------------------------------------------------------------------------------
+# --- TOOL: FILE LIST -----------------------------------------------------------------------------------------------------------
 @tool(return_direct=True, examples=["Quali file ho nella mia cartella?", "Mostrami i miei documenti."])
 def list_files(_, cat):
     """
     List all files in the user's folder.
     The input is an empty object {}.
     """
+    log.info("Starting files listing tool.")
+
     user_path = get_user_path(cat, BASE_FOLDER_CAT)
     try:
         files = os.listdir(user_path)
@@ -95,11 +108,13 @@ def list_files(_, cat):
         
         files_list = "\n- ".join(files)
         return f"Ecco i file nella tua cartella:\n- {files_list}"
+    
     except Exception as e:
-        return f"Errore durante la lettura della cartella: {str(e)}"
+        log.error(f"❌ Error while listing the files in the folder: {str(e)}.")
+        return f"❌ Errore durante la lettura della cartella. Riprova."
 
 
-# --- TOOL: READ ------------------------------------------------------------------------------------------------------
+# --- TOOL: FILE READ -----------------------------------------------------------------------------------------------------------
 @tool(return_direct=True, examples=["Leggimi il contenuto di 'note.pdf'", "Cosa c'è scritto in 'documento.docx'?"])
 def read_file(input_json, cat):
     """
@@ -107,6 +122,8 @@ def read_file(input_json, cat):
     Input MUST be a JSON with the key 'filename',
     for example: {"filename": "note.docx"}
     """
+    log.info("Starting file reading tool.")
+
     try:
         data = json.loads(input_json) if isinstance(input_json, str) else input_json
         filename = data.get("filename")
@@ -131,16 +148,15 @@ def read_file(input_json, cat):
                 return f"Il file '{filename}' sembra essere vuoto o non leggibile."
             else:
                 return f"Contenuto di '{filename}':\n\n{text_read}"
-        else:
-            return f"❌ Il file '{filename}' non esiste."
-    except Exception as e:
-        return f"Errore durante la lettura del file: {str(e)}"
+        
+        return f"❌ Il file '{filename}' non esiste."
 
     except Exception as e:
-        return f"Errore durante la lettura del file {filename}: {str(e)}"
+        log.error(f"❌ Error while reading the file: {str(e)}")
+        return f"❌ Errore durante la lettura del file. Riprova."
 
 
-# --- TOOL: RENAME ----------------------------------------------------------------------------------------------------
+# --- TOOL: FILE RENAME ---------------------------------------------------------------------------------------------------------
 @tool(return_direct=True, examples=["Rinomina 'vecchio.pdf' in 'nuovo.pdf'", "Voglio che 'appunti.docx' si chiami 'riassunto.docx'."])
 def rename_file(input_json, cat):
     """
@@ -148,20 +164,27 @@ def rename_file(input_json, cat):
     Input MUST be a JSON with 'old_name' and 'new_name',
     for example: {"old_name": "vecchio.txt", "new_name": "nuovo.txt"}
     """
+    log.info("Starting file renaming tool.")
+
     try:
         data = json.loads(input_json) if isinstance(input_json, str) else input_json
-        old_path = get_user_path(cat, BASE_FOLDER_CAT, data.get("old_name"))
-        new_path = get_user_path(cat, BASE_FOLDER_CAT, data.get("new_name"))
+        old_name = data.get("old_name")
+        new_name = data.get("new_name")
+        old_path = get_user_path(cat, BASE_FOLDER_CAT, old_name)
+        new_path = get_user_path(cat, BASE_FOLDER_CAT, new_name)
         
         if os.path.exists(old_path):
             os.rename(old_path, new_path)
-            return f"✅ File rinominato con successo in '{data.get('new_name')}'."
-        return f"❌ Il file '{data.get('old_name')}' non esiste."
+            return f"✅ File rinominato con successo in '{new_name}'."
+        
+        return f"❌ Il file '{old_name}' non esiste."
+    
     except Exception as e:
-        return f"Errore durante la rinomina: {str(e)}"
+        log.error(f"❌ Error while renaming the file '{old_name}': {str(e)}")
+        return f"❌ Errore durante la rinomina del file. Riprova."
 
 
-# --- TOOL: DELETE ----------------------------------------------------------------------------------------------------
+# --- TOOL: FILE DELETE ---------------------------------------------------------------------------------------------------------
 @tool(return_direct=True, examples=["Elimina 'da_cancellare.pdf'", "Voglio cancellare 'vecchio.pdf'."])
 def delete_file(input_json, cat):
     """
@@ -169,6 +192,8 @@ def delete_file(input_json, cat):
     Input MUST be a JSON with the key 'filename',
     for example: {"filename": "da_cancellare.txt"}
     """
+    log.info("Starting file deleting tool.")
+
     try:
         data = json.loads(input_json) if isinstance(input_json, str) else input_json
         filename = data.get("filename")
@@ -177,6 +202,9 @@ def delete_file(input_json, cat):
         if os.path.exists(path):
             os.remove(path)
             return f"✅ File '{filename}' eliminato con successo."
+
         return f"❌ Il file '{filename}' non è stato trovato."
+    
     except Exception as e:
-        return f"Errore durante l'eliminazione: {str(e)}"
+        log.error(f"❌ Error while deleting the file '{filename}': {str(e)}")
+        return f"❌ Errore durante l'eliminazione del file."
