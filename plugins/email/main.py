@@ -221,10 +221,11 @@ def send_email(access_token, sender, to, subject, body):
 
 
 # --- TOOL: EMAIL READ ----------------------------------------------------------------------------------------------------------
-@tool(return_direct=True, examples=['Leggi le ultime 5 mail', 'Quali sono le ultime 2 mail ricevute?'])
+@tool(return_direct=True, examples=['Leggi le ultime 5 mail', 'Quali sono le ultime 2 mail?'])
 def email_reader(input_prompt, cat):
     """
-    Return the last emails received in the inbox of the email address specified in the plugin settings.
+    If the form is not useful, use this Tool to return the last emails received in the inbox of the email address specified in the plugin settings.
+    NEVER use this Tool if the user asks something like "Verifica che ..." or "Controlla se ...".
     The input is a text prompt given by the user that should specifies how many emails to retrieve.
     """
     log.info("Starting reading mail plugin.")
@@ -255,7 +256,7 @@ def email_reader(input_prompt, cat):
 @tool(return_direct=True, examples=['Invia una mail a matteo@rewave.it con oggetto "Saluti" chiedendogli come sta'])
 def email_sender(input_json, cat):
     """
-    This tool sends an email with a given subject and body to a specified recipient.
+    This Tool sends an email with given subject and body to a specified recipient.
     The input MUST be a Python dictionary which contains the recipient email address, the subject and the body of the email,
     for example: {"to": "matteo@rewave.it", "subject": "Saluti", "body": "Ciao Matteo, come stai?"}
     """
@@ -290,9 +291,11 @@ def email_sender(input_json, cat):
 # @tool(return_direct=True, examples=["Verifica se l'ultima mail parla di corsi di sicurezza", "Controlla se l'argomento dell'ultima mail riguarda un pacchetto di Microsoft"])
 # def email_classifier(input_topic, cat):
     """
-    Return if the email text speaks about a certain topic.
-    Input MUST be a string specifying the topic to check in the last received email, for example: "input_topic"="corsi di sicurezza" or "input_topic"="pacchetto Microsoft".
+    This Tool returns if the email text is about a certain topic given by the user.
+    Input MUST be a string specifying the topic to check in the last received email,
+    for example: "input_topic"="corsi di sicurezza" or "input_topic"="pacchetto Microsoft".
     """
+    log.info("Starting classifing mail plugin.")
     cat.send_ws_message(f"Verifico se l'argomento dell'ultima email ricevuta riguarda {input_topic}...")
 
     # get email address from settings
@@ -313,35 +316,35 @@ def email_sender(input_json, cat):
 
     # create a prompt for the LLM to classify if the email text is about the input topic or not, and answer only with "SÌ" or "NO"
     prompt = f"""
-        Analizza la seguente email e dimmi se l'argomento principale riguarda: "{input_topic}".
-        
-        Testo dell'email:
-        "{email_text}"
+        Analyze the following email text and determine if the main topic is: {email_topic}.
 
-        Rispondi ESATTAMENTE solo con una parola: "SÌ" o "NO".
+        Email text:
+        {email_text}
+
+        Respond EXACTLY with only one word and no punctuation: "YES" or "NO".
     """
     response = cat.llm(prompt)
 
-    if response.strip().upper() == "SÌ":
-        output = f"L'argomento principale dell'ultima email ricevuta riguarda {input_topic}."
+    if response.strip().upper() == "YES":
+        output = f"L'argomento principale dell'ultima mail ricevuta riguarda {input_topic}."
     else:
-        output = f"L'argomento principale dell'ultima email ricevuta NON riguarda {input_topic}."
+        output = f"L'argomento principale dell'ultima mail ricevuta NON riguarda {input_topic}."
 
-    # send directly the output to the user via websocket if the tool is scheduled, otherwise send it via email
+    # send directly the output to the user if the tool is scheduled
     jobs = cat.white_rabbit.get_jobs()
     if jobs:
         cat.send_ws_message(output, msg_type="chat")
-    else:
-        send_email(token, target_email, target_email, "Argomento ultima mail", output)
     
+    # return will be ignore if the Tool is scheduled
     return output
 
 
 # @tool(return_direct=True, examples=["Controlla se l'ultima mail parla di cartotecnica ogni 30 secondi", "Ogni 60 secondi, verifica se l'ultima mail riguarda i corsi di sicurezza"])
 # def schedule_email_classifier(tool_input, cat):
     """
-    This tool schedules the email_classifier tool to run every given seconds, checking if the last email received is about a certain topic.
-    Input MUST be an object with the topic to check and the interval in seconds, for example: {"topic": "corsi di sicurezza", "interval": 60}
+    This tool schedules the email_classifier Tool to run every given seconds, checking if the last email received is about a certain topic.
+    Input MUST be a Python dictionary with the topic to check and the interval in seconds,
+    for example: {"topic": "corsi di sicurezza", "interval": 60}
     """
     input_obj = json.loads(tool_input)
     topic = input_obj["topic"]
@@ -349,7 +352,8 @@ def email_sender(input_json, cat):
     
     cat.white_rabbit.schedule_interval_job(job=email_classifier.run, seconds=int(interval), input_by_llm=topic, cat=cat)
 
-    return f"Schedulazione avviata: ogni {interval} secondi controllerò se l'ultima mail riguarda {topic}."
+    log.info(f"✅ Tool email_classifier scheduled. Every {interval} seconds it will check if the last email is about: {topic}.")
+    return f"✅ Schedulazione avviata: ogni {interval} secondi controllerò se l'ultima mail riguarda {topic}."
 
 
 # --- FORM: EMAIL REPLY ---------------------------------------------------------------------------------------------------------
@@ -357,29 +361,32 @@ class EmailReply(BaseModel):
     topic: str
     email_received: str
     sender_email: str
-    target_email: str
+    recipient_email: str
     email_subject: str
     email_text: str
 
 @form
 class EmailReplyForm(CatForm):
     description = """
-        Questo form analizzerà l'ultima email ricevuta e se l'argomento principale riguarda il topic specificato,
-        ti proporrà una possibile risposta da inviare al mittente.
-        Potrai modificare testo e dati della mail prima di inviarla, e decidere se inviarla o meno.
+        PRIORITIZE this Form for reading the last received email and return a possible reply with all the mail data (sender, recipient, subject and text).
+        The user should edit text and all the information before the email will be sent.
+        The user must confirm whether send the reply email or not.
+        Prioritize ALWAYS this Form over all the other Tools in this Plugin.
     """
 
     model_class = EmailReply
 
     start_examples=[
         "Verifica se l'ultima e-mail parla di corsi di sicurezza",
-        "Controlla se l'argomento dell'ultima e-mail riguarda un pacchetto di Microsoft"
+        "Controlla se l'ultima email riguarda le intelligenze artificiali",
+        "L'ultima mail ha come argomento principale l'installazione di un server?"
     ]
     
     stop_example = [
-        "Non voglio più mandare l'e-mail",
-        "Annulla l'invio dell'e-mail",
-        "Non inviare l'e-mail"
+        "Non mandare la mail",
+        "Annulla l'invio dell'email",
+        "Non inviare l'e-mail",
+        "No"
     ]
     
     ask_confirm = True
@@ -388,25 +395,29 @@ class EmailReplyForm(CatForm):
         super().__init__(cat)
 
         log.info("Starting reply form plugin.")
+        cat.send_ws_message("Analisi dell'ultima mail in corso...")
 
         # get topic of the email to reply to from the first user prompt
         first_user_prompt = cat.working_memory.user_message_json.text
-        email_topic = cat.llm(f"""Analizza la seguente frase e estrai l'argomento da verificare nelle e-mail (topic).
-            Frase: {first_user_prompt}
+        email_topic = cat.llm(
+            f"""
+                Analyze the following sentence and extract the topic to be verified in the email.
+                Sentence: {first_user_prompt}
 
-            Esempi di output atteso:
-            Se la frase è "Verifica se l'ultima mail parla di corsi di sicurezza", l'output deve essere solo "corsi di sicurezza".
-            Se la frase è "Controlla se l'argomento dell'ultima mail riguarda un pacchetto di Microsoft", l'output deve essere solo "pacchetto Microsoft".
-            
-            Rispondi SOLO con il topic, senza ulteriori spiegazioni o parole aggiuntive.
-            Se non riesci a identificare un topic, rispondi "Nessun topic identificato".
-        """)
+                Expected output examples:
+                If the sentence is "Check if the last email mentions safety courses", the output must be only "safety courses".
+                If the sentence is "Check if the subject of the last email is about a Microsoft package", the output must be only "Microsoft package".
+                
+                Respond ONLY with the topic, without further explanations or additional words.
+                If you cannot identify a topic, respond with "No topic".
+            """
+        )
 
         # get email address from settings
         settings = cat.mad_hatter.get_plugin().load_settings()
         sender_email = settings['email_address']
         if not sender_email:
-            sender_email = "Non trovato"
+            sender_email = "Null"
         
         # download the last email
         msal_app = create_msal_app()
@@ -414,9 +425,9 @@ class EmailReplyForm(CatForm):
         last_email = fetch_emails(token, sender_email, 1)
 
         # take the sender email address from the last email which is the target of the reply
-        start_target = "👤 DA: "
-        end_target = "\n📮 A: "
-        target_email = last_email.split(start_target)[1].split(end_target)[0].strip().split(": ")[-1]
+        start_recipient = "👤 DA: "
+        end_recipient = "\n📮 A: "
+        recipient_email = last_email.split(start_recipient)[1].split(end_recipient)[0].strip().split(": ")[-1]
 
         # take the subject of the last e-mail
         start_subject = "OGGETTO: "
@@ -429,33 +440,36 @@ class EmailReplyForm(CatForm):
         email_text = last_email.split(start_text)[1].split(end_text)[0].strip()
 
         # create a prompt for the LLM to classify if the e-mail text is about the input topic or not, and answer only with "SÌ" or "NO"
-        response = self.cat.llm(f"""
-            Analizza la seguente email e dimmi se l'argomento principale riguarda: {email_topic}.
-            
-            Testo dell'email:
-            {email_text}
+        response = self.cat.llm(
+            f"""
+                Analyze the following email text and determine if the main topic is: {email_topic}.
 
-            Rispondi ESATTAMENTE solo con una parola e senza punteggiatura: "SÌ" o "NO".
-        """)
-
-        # if the response is "SÌ", create a proposed reply to the e-mail
-        if response.strip().upper() == "SÌ":
-            proposed_reply = self.cat.llm(f"""
-                Rispondi alla seguente email proponendo una risposta cordiale ed estremamente sintetica (una frase o qualche parola).
-                Se la mail ricevuta non contiene domande o richieste, rispondi con una frase di cortesia senza aggiungere ulteriori informazioni.
-                Inizia la risposta con "Buongiorno" e termina con "Cordiali saluti".
-                
-                Mail ricevuta:
+                Email text:
                 {email_text}
-            """)
+
+                Respond EXACTLY with only one word and no punctuation: "YES" or "NO".
+            """
+        )
+
+        # if the response is "YES", create a proposed reply to the e-mail
+        if response.strip().upper() == "YES":
+            proposed_reply = self.cat.llm(
+                f"""Reply to the following email with a polite and extremely concise response (a single sentence or just a few words).
+                    If the received email does not contain any questions or requests, reply with a simple courtesy phrase without adding any additional information.
+                    Start the response with "Buongiorno" and end with "Cordiali saluti".
+
+                    Received email:
+                    {email_text}
+                """
+            )
         else:
-            proposed_reply = ""
+            proposed_reply = "Null"
 
         # model data population
         self._model["topic"] = email_topic
         self._model["email_received"] = email_text
         self._model["sender_email"] = sender_email
-        self._model["target_email"] = target_email
+        self._model["recipient_email"] = recipient_email
         self._model["email_subject"] = f"Re: {email_subject}"
         self._model["email_text"] = proposed_reply
     
@@ -466,11 +480,11 @@ class EmailReplyForm(CatForm):
             return {"output": "Form chiuso e nessuna mail in coda da inviare."}
         
         # if the topic of the email is not relevant, don't propose a reply and close the form
-        if self._model['email_text'] == "":
+        if self._model['email_text'] == "Null":
             return {"output": f"L'argomento principale dell'ultima mail ricevuta NON riguarda {self._model['topic']}."}
         
         # if no sender email found in settings
-        if self._model['sender_email'] == "Non trovato":
+        if self._model['sender_email'] == "Null":
             return {"output": "❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."}
         
         # initialize output with model data
@@ -479,7 +493,7 @@ class EmailReplyForm(CatForm):
             f"\n ------------------------------------------------------------" \
             f"\n Proposta di email da inviare come risposta:" \
             f"\n👤 DA: {self._model['sender_email']}" \
-            f"\n📮 A: {self._model['target_email']}" \
+            f"\n📮 A: {self._model['recipient_email']}" \
             f"\n📝 OGGETTO: {self._model['email_subject']}" \
             f"\n📄 TESTO: {self._model['email_text']}" \
             f"\n ------------------------------------------------------------"
@@ -496,7 +510,7 @@ class EmailReplyForm(CatForm):
 
         # add confirmation message if needed
         if self._state == CatFormState.WAIT_CONFIRM:
-            out += "\n --> Posso procedere a inviare l'e-mail?"
+            out += "\n --> Posso procedere a inviare l'e-mail o devo chiudere il form?"
 
         return {"output": out}
 
@@ -505,6 +519,6 @@ class EmailReplyForm(CatForm):
         # sending the email
         msal_app = create_msal_app()
         token = get_access_token(msal_app)
-        send_email(token, form_data["sender_email"], "matteo@rewave.it", form_data["email_subject"], form_data["email_text"])   # TODO change target email with form_data["target_email"]
+        send_email(token, form_data["sender_email"], "matteo@rewave.it", form_data["email_subject"], form_data["email_text"])   # TODO change target email with form_data["recipient_email"]
         
         return {"output": "✅ Email inviata!"}
