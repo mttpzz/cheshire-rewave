@@ -13,6 +13,17 @@ import json
 from dotenv import load_dotenv
 
 
+
+# TODO
+# l'utente richiede di leggere le ultime x mail. il cat risponde con i testi delle ultime x mail e chiede se deve rispondere a una delle mail
+# l'utente risponde no -> fine
+# l'utente risponde sì e indica quale mail (DEVE INDICARLA CON IL NUMERO DELLA MAIL 1, 2, 3, ...), esempio: rispondi alla mail 2 -> avvio del form
+
+
+
+
+
+
 # --- LOGGER --------------------------------------------------------------------------------------------------------------------
 # start the logger with its plugin name
 log = get_plugin_logger("email")
@@ -104,8 +115,8 @@ def format_emails(response):
     Format the email data retrieved from the Microsoft Graph API into a readable string format.
     """
     emails = response.json().get('value', [])
-    format_output = f"\n📬 Last {len(emails)} emails:\n"
-    format_output += "-" * 20
+    format_output = f"📬 Ecco le anteprime delle ultime {len(emails)} email:"
+    format_output += "\n- \n- \n-"
     
     for i, email in enumerate(emails, 1):
         date = email.get('receivedDateTime', '')
@@ -131,14 +142,14 @@ def format_emails(response):
             ]
         recipients_str = ", ".join(recipients_list) if recipients_list else "Nessuno"
         
-        format_output += f"\n📧 Email {i}:" \
+        format_output += f"\n📧 EMAIL {i}" \
             f"\n📅 DATA: {date}" \
             f"\n👤 DA: {sender_name}: {sender_address}" \
             f"\n📮 A: {recipients_str}" \
             f"\n📝 OGGETTO: {subject}" \
             f"\n👁️  LETTA: {'✅ Sì' if {is_read} else '❌ No'}" \
-            f"\n📄 TESTO: {body[:2000]}\n"
-        format_output += "-" * 20
+            f"\n📄 TESTO: {body[:2000]}"
+        format_output += "\n- \n- \n-"
     
     return format_output
 
@@ -224,8 +235,7 @@ def send_email(access_token, sender, to, subject, body):
 @tool(return_direct=True, examples=['Leggi le ultime 5 mail', 'Quali sono le ultime 2 mail?'])
 def email_reader(input_prompt, cat):
     """
-    If the form is not useful, use this Tool to return the last emails received in the inbox of the email address specified in the plugin settings.
-    NEVER use this Tool if the user asks something like "Verifica che ..." or "Controlla se ...".
+    Use this Tool to return the last emails received in the inbox of the email address specified in the plugin settings.
     The input is a text prompt given by the user that should specifies how many emails to retrieve.
     """
     log.info("Starting reading mail plugin.")
@@ -248,6 +258,8 @@ def email_reader(input_prompt, cat):
     msal_app = create_msal_app()
     token = get_access_token(msal_app)
     direct_output = fetch_emails(token, email_address, num_emails)
+    direct_output += "\n ---> Se vuoi che ti proponga una possibile risposta a un'email, indicami il numero della mail. " \
+            "\n Esempio: se vuoi che risponda all'email 3, chiedimi di proporre una risposta alla mail 3."
 
     return direct_output
 
@@ -358,7 +370,6 @@ def email_sender(input_json, cat):
 
 # --- FORM: EMAIL REPLY ---------------------------------------------------------------------------------------------------------
 class EmailReply(BaseModel):
-    topic: str
     email_received: str
     sender_email: str
     recipient_email: str
@@ -368,18 +379,17 @@ class EmailReply(BaseModel):
 @form
 class EmailReplyForm(CatForm):
     description = """
-        PRIORITIZE this Form for reading the last received email and return a possible reply with all the mail data (sender, recipient, subject and text).
-        The user should edit text and all the information before the email will be sent.
-        The user must confirm whether send the reply email or not.
-        Prioritize ALWAYS this Form over all the other Tools in this Plugin.
+        This Form reads the last received emails and return a possible reply to the email indicated by the user.
+        The user must confirm all the information (sender, recipient, subject and text) before sending the reply.
+
+        Example: if the user asks 'Proponi una risposta alla mail 3', this Form will read the last 3 emails and return all the useful data to reply to the mail 3.
     """
 
     model_class = EmailReply
 
     start_examples=[
-        "Verifica se l'ultima e-mail parla di corsi di sicurezza",
-        "Controlla se l'ultima email riguarda le intelligenze artificiali",
-        "L'ultima mail ha come argomento principale l'installazione di un server?"
+        "Proponi una risposta all'email 3",
+        "Cosa posso rispondere alla mail 6?"
     ]
     
     stop_example = [
@@ -395,64 +405,56 @@ class EmailReplyForm(CatForm):
         super().__init__(cat)
 
         log.info("Starting reply form plugin.")
-        cat.send_ws_message("Analisi dell'ultima mail in corso...")
+        cat.send_ws_message("Proposta di risposta all'email in corso...")
 
         # get topic of the email to reply to from the first user prompt
         first_user_prompt = cat.working_memory.user_message_json.text
-        email_topic = cat.llm(
+        email_number = cat.llm(
             f"""
-                Analyze the following sentence and extract the topic to be verified in the email.
+                Analyze the following sentence and extract the number specified by the user.
                 Sentence: {first_user_prompt}
 
                 Expected output examples:
-                If the sentence is "Check if the last email mentions safety courses", the output must be only "safety courses".
-                If the sentence is "Check if the subject of the last email is about a Microsoft package", the output must be only "Microsoft package".
+                If the sentence is "Proponi una risposta alla mail 5", the output must be only "5".
+                If the sentence is "Cosa posso rispondere alla mail tre?", the output must be only "3".
                 
-                Respond ONLY with the topic, without further explanations or additional words.
-                If you cannot identify a topic, respond with "No topic".
+                Respond ONLY with the number, without further explanations or additional words.
+                If you cannot identify a number, respond ONLY with "0".
             """
         )
 
-        # get email address from settings
-        settings = cat.mad_hatter.get_plugin().load_settings()
-        sender_email = settings['email_address']
-        if not sender_email:
-            sender_email = "Null"
-        
-        # download the last email
-        msal_app = create_msal_app()
-        token = get_access_token(msal_app)
-        last_email = fetch_emails(token, sender_email, 1)
+        if email_number != 0:
+            # get email address from settings
+            settings = cat.mad_hatter.get_plugin().load_settings()
+            sender_email = settings['email_address']
+            if not sender_email:
+                sender_email = "Null"
+            
+            # download the last email
+            msal_app = create_msal_app()
+            token = get_access_token(msal_app)
+            last_emails = fetch_emails(token, sender_email, email_number)
 
-        # take the sender email address from the last email which is the target of the reply
-        start_recipient = "👤 DA: "
-        end_recipient = "\n📮 A: "
-        recipient_email = last_email.split(start_recipient)[1].split(end_recipient)[0].strip().split(": ")[-1]
+            # extract the email information
+            start_email = f"📧 EMAIL {email_number}"
+            email_data = last_emails.split(start_email)[1]
 
-        # take the subject of the last e-mail
-        start_subject = "OGGETTO: "
-        end_subject = "\n👁️"
-        email_subject = last_email.split(start_subject)[1].split(end_subject)[0].strip()
-        
-        # take only the e-mail text
-        start_text = "TESTO: "
-        end_text = "\n--------------------"
-        email_text = last_email.split(start_text)[1].split(end_text)[0].strip()
+            # extract the sender email address
+            start_recipient = "👤 DA: "
+            end_recipient = "\n📮 A: "
+            recipient_email = email_data.split(start_recipient)[1].split(end_recipient)[0].strip().split(": ")[-1]
 
-        # create a prompt for the LLM to classify if the e-mail text is about the input topic or not, and answer only with "SÌ" or "NO"
-        response = self.cat.llm(
-            f"""
-                Analyze the following email text and determine if the main topic is: {email_topic}.
+            # extract the subject
+            start_subject = "OGGETTO: "
+            end_subject = "\n👁️"
+            email_subject = email_data.split(start_subject)[1].split(end_subject)[0].strip()
+            
+            # extract the e-mail text
+            start_text = "TESTO: "
+            end_text = "\n--------------------"
+            email_text = email_data.split(start_text)[1].split(end_text)[0].strip()
 
-                Email text:
-                {email_text}
-
-                Respond EXACTLY with only one word and no punctuation: "YES" or "NO".
-            """
-        )
-
-        # if the response is "YES", create a proposed reply to the e-mail
-        if response.strip().upper() == "YES":
+            # create a proposed reply to the e-mail
             proposed_reply = self.cat.llm(
                 f"""Reply to the following email with a polite and extremely concise response (a single sentence or just a few words).
                     If the received email does not contain any questions or requests, reply with a simple courtesy phrase without adding any additional information.
@@ -462,41 +464,44 @@ class EmailReplyForm(CatForm):
                     {email_text}
                 """
             )
-        else:
-            proposed_reply = "Null"
 
-        # model data population
-        self._model["topic"] = email_topic
-        self._model["email_received"] = email_text
-        self._model["sender_email"] = sender_email
-        self._model["recipient_email"] = recipient_email
-        self._model["email_subject"] = f"Re: {email_subject}"
-        self._model["email_text"] = proposed_reply
-    
+            # model data population
+            self._model["email_received"] = email_text
+            self._model["sender_email"] = sender_email
+            self._model["recipient_email"] = recipient_email
+            self._model["email_subject"] = f"Re: {email_subject}"
+            self._model["email_text"] = proposed_reply
+        else:
+            # if no mail number found, populate model data with Null strings
+            self._model["email_received"] = "Null"
+            self._model["sender_email"] = "Null"
+            self._model["recipient_email"] = "Null"
+            self._model["email_subject"] = "Null"
+            self._model["email_text"] = "Null"
+
     
     def message(self):    
         # check if the form is closed
         if self._state == CatFormState.CLOSED:
             return {"output": "Form chiuso e nessuna mail in coda da inviare."}
         
-        # if the topic of the email is not relevant, don't propose a reply and close the form
+        # if the number of the email is not defined
         if self._model['email_text'] == "Null":
-            return {"output": f"L'argomento principale dell'ultima mail ricevuta NON riguarda {self._model['topic']}."}
+            return {"output": f"❌ Nessuna mail trovata. Riprova."}
         
         # if no sender email found in settings
         if self._model['sender_email'] == "Null":
             return {"output": "❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."}
         
         # initialize output with model data
-        out: str = f"L'ultima mail ricevuta ha come argomento {self._model['topic']}." \
-            f"\n📧 Il testo della mail è:\n{self._model['email_received'][:200]}" \
-            f"\n ------------------------------------------------------------" \
+        out: str = f"\n📧 Il testo della mail ricevuta è:\n{self._model['email_received'][:100]}" \
+            "\n- \n- \n-" \
             f"\n Proposta di email da inviare come risposta:" \
             f"\n👤 DA: {self._model['sender_email']}" \
             f"\n📮 A: {self._model['recipient_email']}" \
             f"\n📝 OGGETTO: {self._model['email_subject']}" \
-            f"\n📄 TESTO: {self._model['email_text']}" \
-            f"\n ------------------------------------------------------------"
+            f"\n📄 TESTO: {self._model['email_text']}\n" \
+            "\n- \n- \n-"
         
         # add missing fields
         missing_fields: List[str] = self._missing_fields
@@ -510,7 +515,7 @@ class EmailReplyForm(CatForm):
 
         # add confirmation message if needed
         if self._state == CatFormState.WAIT_CONFIRM:
-            out += "\n --> Posso procedere a inviare l'e-mail o devo chiudere il form?"
+            out += "\n ---> Posso procedere a inviare l'e-mail o devo chiudere il form?"
 
         return {"output": out}
 
