@@ -13,17 +13,6 @@ import json
 from dotenv import load_dotenv
 
 
-
-# TODO
-# l'utente richiede di leggere le ultime x mail. il cat risponde con i testi delle ultime x mail e chiede se deve rispondere a una delle mail
-# l'utente risponde no -> fine
-# l'utente risponde sì e indica quale mail (DEVE INDICARLA CON IL NUMERO DELLA MAIL 1, 2, 3, ...), esempio: rispondi alla mail 2 -> avvio del form
-
-
-
-
-
-
 # --- LOGGER --------------------------------------------------------------------------------------------------------------------
 # start the logger with its plugin name
 log = get_plugin_logger("email")
@@ -300,12 +289,12 @@ def email_sender(input_json, cat):
 
 
 # --- TOOL: EMAIL CLASSIFY ------------------------------------------------------------------------------------------------------
-# @tool(return_direct=True, examples=["Verifica se l'ultima mail parla di corsi di sicurezza", "Controlla se l'argomento dell'ultima mail riguarda un pacchetto di Microsoft"])
-# def email_classifier(input_topic, cat):
+@tool(return_direct=True, examples=["Verifica se l'ultima mail parla di corsi di sicurezza", "Controlla se l'argomento dell'ultima mail riguarda un pacchetto di Microsoft"])
+def email_classifier(input_topic, cat):
     """
-    This Tool returns if the email text is about a certain topic given by the user.
+    This Tool returns if the last email text is about a certain topic, given by the user.
     Input MUST be a string specifying the topic to check in the last received email,
-    for example: "input_topic"="corsi di sicurezza" or "input_topic"="pacchetto Microsoft".
+    for example: input_topic="corsi di sicurezza" or input_topic="cartotecnica".
     """
     log.info("Starting classifing mail plugin.")
     cat.send_ws_message(f"Verifico se l'argomento dell'ultima email ricevuta riguarda {input_topic}...")
@@ -328,7 +317,7 @@ def email_sender(input_json, cat):
 
     # create a prompt for the LLM to classify if the email text is about the input topic or not, and answer only with "SÌ" or "NO"
     prompt = f"""
-        Analyze the following email text and determine if the main topic is: {email_topic}.
+        Analyze the following email text and determine if the main topic is: {input_topic}.
 
         Email text:
         {email_text}
@@ -338,21 +327,21 @@ def email_sender(input_json, cat):
     response = cat.llm(prompt)
 
     if response.strip().upper() == "YES":
-        output = f"L'argomento principale dell'ultima mail ricevuta riguarda {input_topic}."
+        output = f"✅ L'argomento principale dell'ultima mail ricevuta riguarda {input_topic}."
     else:
-        output = f"L'argomento principale dell'ultima mail ricevuta NON riguarda {input_topic}."
+        output = f"⚠️ L'argomento principale dell'ultima mail ricevuta NON riguarda {input_topic}."
 
     # send directly the output to the user if the tool is scheduled
     jobs = cat.white_rabbit.get_jobs()
     if jobs:
         cat.send_ws_message(output, msg_type="chat")
     
-    # return will be ignore if the Tool is scheduled
+    # return will be ignore if the tool is scheduled
     return output
 
 
-# @tool(return_direct=True, examples=["Controlla se l'ultima mail parla di cartotecnica ogni 30 secondi", "Ogni 60 secondi, verifica se l'ultima mail riguarda i corsi di sicurezza"])
-# def schedule_email_classifier(tool_input, cat):
+@tool(return_direct=True, examples=["Controlla se l'ultima mail parla di cartotecnica ogni 30 secondi", "Ogni 60 secondi, verifica se l'ultima mail riguarda i corsi di sicurezza"])
+def schedule_email_classifier(tool_input, cat):
     """
     This tool schedules the email_classifier Tool to run every given seconds, checking if the last email received is about a certain topic.
     Input MUST be a Python dictionary with the topic to check and the interval in seconds,
@@ -376,6 +365,7 @@ class EmailReply(BaseModel):
     email_subject: str
     email_text: str
 
+
 @form
 class EmailReplyForm(CatForm):
     description = """
@@ -389,7 +379,8 @@ class EmailReplyForm(CatForm):
 
     start_examples=[
         "Proponi una risposta all'email 3",
-        "Cosa posso rispondere alla mail 6?"
+        "Cosa posso rispondere alla mail 6?",
+        "Dimmi cosa rispondere alla mail 1"
     ]
     
     stop_example = [
@@ -422,62 +413,66 @@ class EmailReplyForm(CatForm):
                 If you cannot identify a number, respond ONLY with "0".
             """
         )
+        try:
+            if email_number != 0:
+                # get email address from settings
+                settings = cat.mad_hatter.get_plugin().load_settings()
+                sender_email = settings['email_address']
+                if not sender_email:
+                    sender_email = "Null"
+                
+                # download the last email
+                msal_app = create_msal_app()
+                token = get_access_token(msal_app)
+                last_emails = fetch_emails(token, sender_email, email_number)
 
-        if email_number != 0:
-            # get email address from settings
-            settings = cat.mad_hatter.get_plugin().load_settings()
-            sender_email = settings['email_address']
-            if not sender_email:
-                sender_email = "Null"
-            
-            # download the last email
-            msal_app = create_msal_app()
-            token = get_access_token(msal_app)
-            last_emails = fetch_emails(token, sender_email, email_number)
+                # extract the email information
+                start_email = f"📧 EMAIL {email_number}"
+                email_data = last_emails.split(start_email)[1]
 
-            # extract the email information
-            start_email = f"📧 EMAIL {email_number}"
-            email_data = last_emails.split(start_email)[1]
+                # extract the sender email address
+                start_recipient = "👤 DA: "
+                end_recipient = "\n📮 A: "
+                recipient_email = email_data.split(start_recipient)[1].split(end_recipient)[0].strip().split(": ")[-1]
 
-            # extract the sender email address
-            start_recipient = "👤 DA: "
-            end_recipient = "\n📮 A: "
-            recipient_email = email_data.split(start_recipient)[1].split(end_recipient)[0].strip().split(": ")[-1]
+                # extract the subject
+                start_subject = "OGGETTO: "
+                end_subject = "\n👁️"
+                email_subject = email_data.split(start_subject)[1].split(end_subject)[0].strip()
+                
+                # extract the e-mail text
+                start_text = "TESTO: "
+                end_text = "\n--------------------"
+                email_text = email_data.split(start_text)[1].split(end_text)[0].strip()
 
-            # extract the subject
-            start_subject = "OGGETTO: "
-            end_subject = "\n👁️"
-            email_subject = email_data.split(start_subject)[1].split(end_subject)[0].strip()
-            
-            # extract the e-mail text
-            start_text = "TESTO: "
-            end_text = "\n--------------------"
-            email_text = email_data.split(start_text)[1].split(end_text)[0].strip()
+                # create a proposed reply to the e-mail
+                proposed_reply = self.cat.llm(
+                    f"""Reply to the following email with a polite and extremely concise response (a single sentence or just a few words).
+                        If the received email does not contain any questions or requests, reply with a simple courtesy phrase without adding any additional information.
+                        Start the response with "Buongiorno" and end with "Cordiali saluti".
 
-            # create a proposed reply to the e-mail
-            proposed_reply = self.cat.llm(
-                f"""Reply to the following email with a polite and extremely concise response (a single sentence or just a few words).
-                    If the received email does not contain any questions or requests, reply with a simple courtesy phrase without adding any additional information.
-                    Start the response with "Buongiorno" and end with "Cordiali saluti".
+                        Received email:
+                        {email_text}
+                    """
+                )
 
-                    Received email:
-                    {email_text}
-                """
-            )
-
-            # model data population
-            self._model["email_received"] = email_text
-            self._model["sender_email"] = sender_email
-            self._model["recipient_email"] = recipient_email
-            self._model["email_subject"] = f"Re: {email_subject}"
-            self._model["email_text"] = proposed_reply
-        else:
-            # if no mail number found, populate model data with Null strings
-            self._model["email_received"] = "Null"
-            self._model["sender_email"] = "Null"
-            self._model["recipient_email"] = "Null"
-            self._model["email_subject"] = "Null"
-            self._model["email_text"] = "Null"
+                # model data population
+                self._model["email_received"] = email_text
+                self._model["sender_email"] = sender_email
+                self._model["recipient_email"] = recipient_email
+                self._model["email_subject"] = f"Re: {email_subject}"
+                self._model["email_text"] = proposed_reply
+            else:
+                # if no mail number found, populate model data with Null strings
+                self._model["email_received"] = "Null"
+                self._model["sender_email"] = "Null"
+                self._model["recipient_email"] = "Null"
+                self._model["email_subject"] = "Null"
+                self._model["email_text"] = "Null"
+        
+        except Exception as e:
+            log.error(f"❌ Error while creating a reply: {str(e)}.")
+            self._model["email_text"] = "Error"
 
     
     def message(self):    
@@ -488,6 +483,9 @@ class EmailReplyForm(CatForm):
         # if the number of the email is not defined
         if self._model['email_text'] == "Null":
             return {"output": f"❌ Nessuna mail trovata. Riprova."}
+        # if there is an error during the init function
+        elif self._model["email_text"] == "Error":
+            return {"output": f"❌ Problema durante la creazione della mail di risposta. Riprova."}
         
         # if no sender email found in settings
         if self._model['sender_email'] == "Null":
