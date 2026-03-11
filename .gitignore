@@ -4,6 +4,9 @@ plugins/cat_advanced_tools/*
 # token file
 token_cache.bin
 
+# user files
+temp/*
+
 # docker files
 data/*
 
