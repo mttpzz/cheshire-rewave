@@ -88,7 +88,7 @@ def create_file(input_json, cat):
 
     # folder for file access
     user_path = get_user_path(cat, BASE_FOLDER_USER)
-    user_path_link = f'<a href="{user_path}">{user_path}</a>'
+    user_path_link = f'<a href="{user_path}" target="_blank">{user_path}</a>'
     
     return f"✅ Fatto! Puoi vedere il file **{file_name}** in questa cartella: {user_path_link}"
 
