@@ -15,3 +15,5 @@ services:
       - ./data:/app/cat/data
       - ./temp:/app/cat/temp # folder to manage user files
       - ./logs:/app/cat/logs  # logs folder
+    env_file:
+      - .env  # no file .env in the container — Docker reads the values and write them directly as environment variables

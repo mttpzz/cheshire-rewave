@@ -13,10 +13,12 @@ from docx import Document
 log = get_plugin_logger("file-manager")
 
 
-# --- LOCAL FOLDER MANAGER ------------------------------------------------------------------------------------------------------
-BASE_FOLDER_CAT = "cat/temp"
-BASE_FOLDER_USER = "temp"
+# --- ENV VARIABLES -------------------------------------------------------------------------------------------------------------
+BASE_FOLDER_CAT = os.getenv('BASE_FOLDER_CAT')
+BASE_FOLDER_USER = os.getenv('BASE_FOLDER_USER')
 
+
+# --- PATH SECURITY FUNCTION ----------------------------------------------------------------------------------------------------
 # Security and utility function to manage user paths safely (Path traversal prevention)
 def get_user_path(cat, folder, filename=None):
     user_id = cat.user_id

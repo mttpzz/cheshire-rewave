@@ -3,11 +3,16 @@ import os
 from logging.handlers import RotatingFileHandler
 
 
+# --- ENV VARIABLES -------------------------------------------------------------------------------------------------------------
+LOG_FOLDER = os.getenv('LOG_FOLDER')
+
+
+# --- LOGGER --------------------------------------------------------------------------------------------------------------------
 def get_plugin_logger(plugin_name: str) -> logging.Logger:
     """Crea un logger dedicato per ogni plugin."""
 
     # cat logs dir
-    log_dir = "/app/cat/logs"
+    log_dir = LOG_FOLDER
     plugin_dir = os.path.join(log_dir, plugin_name)
     os.makedirs(plugin_dir, exist_ok=True)
 

@@ -10,7 +10,6 @@ import os
 import atexit
 from bs4 import BeautifulSoup
 import json
-from dotenv import load_dotenv
 
 
 # --- LOGGER --------------------------------------------------------------------------------------------------------------------
@@ -19,9 +18,6 @@ log = get_plugin_logger("email")
 
 
 # --- ENV VARIABLES -------------------------------------------------------------------------------------------------------------
-# load environment variables from .env file
-load_dotenv()
-
 CLIENT_ID = os.getenv('CLIENT_ID')
 CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 TENANT_ID = os.getenv('TENANT_ID')  # 'common' if multitenant
