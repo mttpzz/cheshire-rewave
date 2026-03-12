@@ -4,6 +4,9 @@ plugins/cat_advanced_tools/*
 # token file
 token_cache.bin
 
+# token folders and files
+token/*
+
 # user files
 temp/*
 

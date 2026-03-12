@@ -27,14 +27,17 @@ SCOPES = ['Mail.Read', 'Mail.ReadWrite']
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 
 # token file Docker path
-CACHE_FILE = "/app/cat/plugins/email/token_cache.bin"
+BASE_CACHE_PATH = "/app/cat/plugins/email/token"
 
 
 # --- CACHE AND TOKEN -----------------------------------------------------------------------------------------------------------
-def create_msal_app():
+def create_msal_app(user_id):
     """
     msal app used to configure cache file.
     """
+    USER_CACHE_PATH = os.path.join(BASE_CACHE_PATH, user_id)
+    CACHE_FILE = os.path.join(USER_CACHE_PATH, "token_cache.bin")
+
     # creation of a serializable cache object
     cache = msal.SerializableTokenCache()
 
@@ -46,8 +49,13 @@ def create_msal_app():
     # function to save the cache on exit
     def save_cache():
         if cache.has_state_changed:
-            with open(CACHE_FILE, "w") as f:
-                f.write(cache.serialize())
+            try:
+                os.makedirs(USER_CACHE_PATH, exist_ok=True)
+                with open(CACHE_FILE, "w") as f:
+                    log.warning("✅ Token file saved.")
+                    f.write(cache.serialize())
+            except OSError as e:
+                log.error(f"❌ Error in saving the token: {str(e)}")
     
     # register the function to save the cache on exit
     atexit.register(save_cache)
@@ -58,10 +66,10 @@ def create_msal_app():
         authority=AUTHORITY,
         token_cache=cache
     )
-    return app
+    return app, save_cache
 
 
-def get_access_token(app):
+def get_access_token(app, save_cache):
     """
     Authentication handler with cache
     """
@@ -70,6 +78,7 @@ def get_access_token(app):
     if accounts:
         result = app.acquire_token_silent(SCOPES, account=accounts[0])
         if result:
+            save_cache()
             log.info("✅ Token found in the cache (No login required).")
             return result['access_token']
 
@@ -87,6 +96,7 @@ def get_access_token(app):
     result = app.acquire_token_by_device_flow(flow)
 
     if 'access_token' in result:
+        save_cache()
         log.warning("✅ Authentication done! Token saved.")
         return result['access_token']
     else:
@@ -240,8 +250,9 @@ def email_reader(input_prompt, cat):
     num_emails = cat.llm(prompt)
 
     # download emails
-    msal_app = create_msal_app()
-    token = get_access_token(msal_app)
+    user_id = cat.user_id
+    msal_app, save_cache = create_msal_app(user_id)
+    token = get_access_token(msal_app, save_cache)
     direct_output = fetch_emails(token, email_address, num_emails)
     direct_output += "\n ---> Se vuoi che ti proponga una possibile risposta a un'email, indicami il numero della mail. " \
             "\n Esempio: se vuoi che risponda all'email 3, chiedimi di proporre una risposta alla mail 3."
@@ -277,8 +288,9 @@ def email_sender(input_json, cat):
         return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
 
     # sending email
-    msal_app = create_msal_app()
-    token = get_access_token(msal_app)
+    user_id = cat.user_id
+    msal_app, save_cache = create_msal_app(user_id)
+    token = get_access_token(msal_app, save_cache)
     direct_output = send_email(token, sender_email, to, subject, body)
 
     return direct_output
@@ -302,8 +314,9 @@ def email_classifier(input_topic, cat):
         return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
 
     # download the last email
-    msal_app = create_msal_app()
-    token = get_access_token(msal_app)
+    user_id = cat.user_id
+    msal_app, save_cache = create_msal_app(user_id)
+    token = get_access_token(msal_app, save_cache)
     last_email = fetch_emails(token, target_email, 1)
 
     # take only the email text from the output of fetch_emails
@@ -370,7 +383,6 @@ class EmailReplyForm(CatForm):
 
         Example: if the user asks 'Proponi una risposta alla mail 3', this Form will read the last 3 emails and return all the useful data to reply to the mail 3.
     """
-
     model_class = EmailReply
 
     start_examples=[
@@ -390,6 +402,8 @@ class EmailReplyForm(CatForm):
 
     def __init__(self, cat):
         super().__init__(cat)
+
+        self.user_id = cat.user_id
 
         log.info("Starting reply form plugin.")
         cat.send_ws_message("Proposta di risposta all'email in corso...")
@@ -418,8 +432,9 @@ class EmailReplyForm(CatForm):
                     sender_email = "Null"
                 
                 # download the last email
-                msal_app = create_msal_app()
-                token = get_access_token(msal_app)
+                user_id = cat.user_id
+                msal_app, save_cache = create_msal_app(user_id)
+                token = get_access_token(msal_app, save_cache)
                 last_emails = fetch_emails(token, sender_email, email_number)
 
                 # extract the email information
@@ -488,7 +503,7 @@ class EmailReplyForm(CatForm):
             return {"output": "❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."}
         
         # initialize output with model data
-        out: str = f"\n📧 Il testo della mail ricevuta è:\n{self._model['email_received'][:100]}" \
+        out: str = f"\n📧 Il testo della mail ricevuta è:\n{self._model['email_received']}" \
             "\n- \n- \n-" \
             f"\n Proposta di email da inviare come risposta:" \
             f"\n👤 DA: {self._model['sender_email']}" \
@@ -516,8 +531,8 @@ class EmailReplyForm(CatForm):
 
     def submit(self, form_data):
         # sending the email
-        msal_app = create_msal_app()
-        token = get_access_token(msal_app)
+        msal_app, save_cache = create_msal_app(self.user_id)
+        token = get_access_token(msal_app, save_cache)
         send_email(token, form_data["sender_email"], "matteo@rewave.it", form_data["email_subject"], form_data["email_text"])   # TODO change target email with form_data["recipient_email"]
         
         return {"output": "✅ Email inviata!"}
