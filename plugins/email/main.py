@@ -10,6 +10,7 @@ import os
 import atexit
 from bs4 import BeautifulSoup
 import json
+import re
 
 
 # --- LOGGER --------------------------------------------------------------------------------------------------------------------
@@ -428,9 +429,10 @@ class EmailReplyForm(CatForm):
         super().__init__(cat)
 
         self.user_id = cat.user_id
+        self.error_msg = "" # initialize an empty error msg
 
         log.info("Starting reply form plugin.")
-        cat.send_ws_message("Proposta di risposta all'email in corso...")
+        cat.send_ws_message("Elaborazione dell'email in corso...")
 
         # get topic of the email to reply to from the first user prompt
         first_user_prompt = cat.working_memory.user_message_json.text
@@ -447,67 +449,67 @@ class EmailReplyForm(CatForm):
                 If you cannot identify a number, respond ONLY with "0".
             """
         )
+
         try:
             if email_number != 0:
                 # get email address from settings
                 settings = cat.mad_hatter.get_plugin().load_settings()
                 sender_email = settings['email_address']
+                
                 if not sender_email:
-                    sender_email = "Null"
+                    self.error_msg = "❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
+                    return
                 
                 # download the last email
-                user_id = cat.user_id
-                msal_app, save_cache = create_msal_app(user_id)
+                msal_app, save_cache = create_msal_app(self.user_id)
                 token = get_access_token(cat, msal_app, save_cache)
                 last_emails = fetch_emails(token, sender_email, email_number)
-
+                
                 # extract the email information
                 start_email = f"📧 EMAIL {email_number}"
                 email_data = last_emails.split(start_email)[1]
-
-                # extract the sender email address
-                start_recipient = "👤 DA: "
-                end_recipient = "\n📮 A: "
-                recipient_email = email_data.split(start_recipient)[1].split(end_recipient)[0].strip().split(": ")[-1]
-
-                # extract the subject
-                start_subject = "OGGETTO: "
-                end_subject = "\n👁️"
-                email_subject = email_data.split(start_subject)[1].split(end_subject)[0].strip()
                 
-                # extract the e-mail text
-                start_text = "TESTO: "
-                end_text = "\n--------------------"
-                email_text = email_data.split(start_text)[1].split(end_text)[0].strip()
-
-                # create a proposed reply to the e-mail
-                proposed_reply = self.cat.llm(
+                proposed_reply_str = cat.llm(
                     f"""Reply to the following email with a polite and extremely concise response (a single sentence or just a few words).
-                        If the received email does not contain any questions or requests, reply with a simple courtesy phrase without adding any additional information.
+                        If the email does not contain any questions or requests, reply with a simple courtesy phrase without adding any additional information.
                         Start the response with "Buongiorno" and end with "Cordiali saluti".
+                        
+                        Email:
+                        {email_data}
 
-                        Received email:
-                        {email_text}
+                        Respond ONLY with a valid JSON which MUST contains the text of the received mail, the sender, the recipient, the subject reply and the text of the email to be sent as a reply,
+                        for example: {{"received_email": "Text of the received mail", "from": "sender@email.it", "to": "recipient@email.com", "subject": "Re: subject", "body": "Reply to the received email."}}
                     """
                 )
-
-                # model data population
-                self._model["email_received"] = email_text
-                self._model["sender_email"] = sender_email
-                self._model["recipient_email"] = recipient_email
-                self._model["email_subject"] = f"Re: {email_subject}"
-                self._model["email_text"] = proposed_reply
+                
+                # parsing the cat llm reply
+                try:
+                    # removing backticks and tag ```json
+                    proposed_reply_str = re.sub(r'^```json\s*', '', proposed_reply_str, flags=re.IGNORECASE)
+                    proposed_reply_str = re.sub(r'\s*```$', '', proposed_reply_str).strip()
+                    
+                    # from str to json
+                    proposed_reply = json.loads(proposed_reply_str) if isinstance(proposed_reply_str, str) else proposed_reply_str
+                    
+                    # model data population
+                    self._model["email_received"] = proposed_reply.get("received_email", "")
+                    self._model["sender_email"] = proposed_reply.get("to", "").lower().strip()
+                    self._model["recipient_email"] = proposed_reply.get("from", "").lower().strip()
+                    self._model["email_subject"] = proposed_reply.get("subject", "")
+                    self._model["email_text"] = proposed_reply.get("body", "")
+                except Exception as e:
+                    log.error(f"❌ Error while parsing the proposed reply: {str(e)}.")
+                    self.error_msg = "❌ Problema durante la lettura della mail ricevuta. Riprova."
+                    return
             else:
-                # if no mail number found, populate model data with Null strings
-                self._model["email_received"] = "Null"
-                self._model["sender_email"] = "Null"
-                self._model["recipient_email"] = "Null"
-                self._model["email_subject"] = "Null"
-                self._model["email_text"] = "Null"
+                # if no mail number found
+                self.error_msg = "❌ Nessuna mail trovata. Riprova."
+                return
         
         except Exception as e:
             log.error(f"❌ Error while creating a reply: {str(e)}.")
-            self._model["email_text"] = "Error"
+            self.error_msg = "❌ Problema durante la creazione della mail di risposta. Riprova."
+            return
 
     
     def message(self):    
@@ -515,16 +517,9 @@ class EmailReplyForm(CatForm):
         if self._state == CatFormState.CLOSED:
             return {"output": "Form chiuso e nessuna mail in coda da inviare."}
         
-        # if the number of the email is not defined
-        if self._model['email_text'] == "Null":
-            return {"output": f"❌ Nessuna mail trovata. Riprova."}
-        # if there is an error during the init function
-        elif self._model["email_text"] == "Error":
-            return {"output": f"❌ Problema durante la creazione della mail di risposta. Riprova."}
-        
-        # if no sender email found in settings
-        if self._model['sender_email'] == "Null":
-            return {"output": "❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."}
+        # if exists an error
+        if self.error_msg:
+            return {"output": self.error_msg}
         
         # initialize output with model data
         out: str = f"\n📧 Il testo della mail ricevuta è:\n{self._model['email_received']}" \
