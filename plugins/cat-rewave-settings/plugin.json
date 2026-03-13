@@ -1,0 +1,7 @@
+{
+    "name": "Cat Rewave Settings",
+    "description": "This plugin is similar to the ***C.A.T. - Cat Advanced Tools by FritzTheCat*** plugin which allows quickly editing some core settings plus it also manages the user folder link.",
+    "author_name": "7pm",
+    "version": "0.1.0",
+    "tags": "prompt,memory,settings,folder"
+}

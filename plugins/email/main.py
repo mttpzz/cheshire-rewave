@@ -279,8 +279,8 @@ def email_reader(input_prompt, cat):
     msal_app, save_cache = create_msal_app(user_id)
     token = get_access_token(cat, msal_app, save_cache)
     direct_output = fetch_emails(token, email_address, num_emails)
-    direct_output += "\n ---> Se vuoi che ti proponga una possibile risposta a un'email, indicami il numero della mail. " \
-            "\n Esempio: se vuoi che risponda all'email 3, chiedimi di proporre una risposta alla mail 3."
+    direct_output += "\n 👉 Se vuoi che ti proponga una possibile risposta a un'email, indicami il numero della mail. " \
+            "\n 👉 Esempio: se vuoi che risponda all'email 3, chiedimi di proporre una risposta alla mail 3."
 
     return direct_output
 
@@ -464,7 +464,7 @@ class EmailReplyForm(CatForm):
                 msal_app, save_cache = create_msal_app(self.user_id)
                 token = get_access_token(cat, msal_app, save_cache)
                 last_emails = fetch_emails(token, sender_email, email_number)
-                
+
                 # extract the email information
                 start_email = f"📧 EMAIL {email_number}"
                 email_data = last_emails.split(start_email)[1]
@@ -524,7 +524,7 @@ class EmailReplyForm(CatForm):
         # initialize output with model data
         out: str = f"\n📧 Il testo della mail ricevuta è:\n{self._model['email_received']}" \
             "\n- \n- \n-" \
-            f"\n Proposta di email da inviare come risposta:" \
+            f"\n 👉 Proposta di email da inviare come risposta:" \
             f"\n👤 DA: {self._model['sender_email']}" \
             f"\n📮 A: {self._model['recipient_email']}" \
             f"\n📝 OGGETTO: {self._model['email_subject']}" \
@@ -543,7 +543,7 @@ class EmailReplyForm(CatForm):
 
         # add confirmation message if needed
         if self._state == CatFormState.WAIT_CONFIRM:
-            out += "\n ---> Posso procedere a inviare l'e-mail o devo chiudere il form?"
+            out += "\n 👉 Posso procedere a inviare l'e-mail o devo chiudere il form?"
 
         return {"output": out}
 
