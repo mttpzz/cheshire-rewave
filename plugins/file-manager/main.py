@@ -72,7 +72,6 @@ def create_file(input_json, cat):
             full_path = get_user_path(cat, BASE_FOLDER_CAT, file_name)
 
             doc = Document()
-            # doc.add_heading('Documento Utente', 0)
             doc.add_paragraph(file_text)
             doc.save(full_path)
         else:   # txt files

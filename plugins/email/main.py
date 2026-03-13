@@ -22,6 +22,8 @@ CLIENT_ID = os.getenv('CLIENT_ID')
 CLIENT_SECRET = os.getenv('CLIENT_SECRET')
 TENANT_ID = os.getenv('TENANT_ID')  # 'common' if multitenant
 
+BASE_FOLDER_CAT = os.getenv('BASE_FOLDER_CAT')
+
 # permissions (Scope)
 SCOPES = ['Mail.Read', 'Mail.ReadWrite']
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
@@ -52,10 +54,10 @@ def create_msal_app(user_id):
             try:
                 os.makedirs(USER_CACHE_PATH, exist_ok=True)
                 with open(CACHE_FILE, "w") as f:
-                    log.warning("✅ Token file saved.")
                     f.write(cache.serialize())
+                    log.warning("✅ Token file saved.")
             except OSError as e:
-                log.error(f"❌ Error in saving the token: {str(e)}")
+                log.error(f"❌ Error while saving the token file: {str(e)}")
     
     # register the function to save the cache on exit
     atexit.register(save_cache)
@@ -69,7 +71,7 @@ def create_msal_app(user_id):
     return app, save_cache
 
 
-def get_access_token(app, save_cache):
+def get_access_token(cat, app, save_cache):
     """
     Authentication handler with cache
     """
@@ -83,21 +85,43 @@ def get_access_token(app, save_cache):
             return result['access_token']
 
     # if no token found, start device flow
-    log.warning("⚠️ No token found. Login...")
+    log.warning("⚠️ No token found. Login required.")
     
     flow = app.initiate_device_flow(scopes=SCOPES)
     if 'user_code' not in flow:
         log.error("❌ Can't create Device Flow.")
-        raise ValueError("Can't create Device Flow.")
+    
+    # create a login.txt file with login instructions for creating the token file
+    try:
+        file_text = f"👉 Collegati a questo link: {flow['verification_uri']}\n" \
+                    f"👉 e inserisci il seguente codice: {flow['user_code']}\n" \
+                    "N.B. Potrebbe chiedere di eseguire il login con le tue credenziali Microsoft aziendali."
+        
+        user_id = cat.user_id
+        base_path = os.path.join(BASE_FOLDER_CAT, user_id)
+        filename = 'login.txt'
 
-    log.warning(f"👉 Login page: {flow['verification_uri']}")
-    log.warning(f"👉 Insert the following code: {flow['user_code']}\n")
+        if not os.path.exists(base_path):
+            os.makedirs(base_path)
+        
+        # os.path.basename impedisce attacchi di tipo path traversal
+        full_path = os.path.join(base_path, os.path.basename(filename))
+        
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(file_text)
+
+    except Exception as e:
+        log.error(f"❌ Error during login file creation: {str(e)}.")
+
+    cat.send_ws_message(f"Apri il file ***{filename}*** e segui le istruzioni.")
     
     result = app.acquire_token_by_device_flow(flow)
 
     if 'access_token' in result:
         save_cache()
         log.warning("✅ Authentication done! Token saved.")
+        if os.path.exists(full_path):
+            os.remove(full_path)    # delete login file
         return result['access_token']
     else:
         log.error(f"❌ Error during authentication: {result.get('error')}")
@@ -252,7 +276,7 @@ def email_reader(input_prompt, cat):
     # download emails
     user_id = cat.user_id
     msal_app, save_cache = create_msal_app(user_id)
-    token = get_access_token(msal_app, save_cache)
+    token = get_access_token(cat, msal_app, save_cache)
     direct_output = fetch_emails(token, email_address, num_emails)
     direct_output += "\n ---> Se vuoi che ti proponga una possibile risposta a un'email, indicami il numero della mail. " \
             "\n Esempio: se vuoi che risponda all'email 3, chiedimi di proporre una risposta alla mail 3."
@@ -290,7 +314,7 @@ def email_sender(input_json, cat):
     # sending email
     user_id = cat.user_id
     msal_app, save_cache = create_msal_app(user_id)
-    token = get_access_token(msal_app, save_cache)
+    token = get_access_token(cat, msal_app, save_cache)
     direct_output = send_email(token, sender_email, to, subject, body)
 
     return direct_output
@@ -316,7 +340,7 @@ def email_classifier(input_topic, cat):
     # download the last email
     user_id = cat.user_id
     msal_app, save_cache = create_msal_app(user_id)
-    token = get_access_token(msal_app, save_cache)
+    token = get_access_token(cat, msal_app, save_cache)
     last_email = fetch_emails(token, target_email, 1)
 
     # take only the email text from the output of fetch_emails
@@ -434,7 +458,7 @@ class EmailReplyForm(CatForm):
                 # download the last email
                 user_id = cat.user_id
                 msal_app, save_cache = create_msal_app(user_id)
-                token = get_access_token(msal_app, save_cache)
+                token = get_access_token(cat, msal_app, save_cache)
                 last_emails = fetch_emails(token, sender_email, email_number)
 
                 # extract the email information
@@ -532,7 +556,7 @@ class EmailReplyForm(CatForm):
     def submit(self, form_data):
         # sending the email
         msal_app, save_cache = create_msal_app(self.user_id)
-        token = get_access_token(msal_app, save_cache)
+        token = get_access_token(self._cat, msal_app, save_cache)
         send_email(token, form_data["sender_email"], "matteo@rewave.it", form_data["email_subject"], form_data["email_text"])   # TODO change target email with form_data["recipient_email"]
         
         return {"output": "✅ Email inviata!"}
