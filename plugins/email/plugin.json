@@ -1,7 +1,7 @@
 {
-    "name": "Mail Manager",
-    "description": "Reading, writing emails and reply based on the argument",
+    "name": "Mail and Cal Manager",
+    "description": "Reading, writing emails and reply to emails; get, create and delete events.",
     "author_name": "7pm",
-    "version": "0.3.0",
-    "tags": "email,outlook,read,write,reply,form"
+    "version": "0.4.0",
+    "tags": "email,calendar,outlook"
 }
