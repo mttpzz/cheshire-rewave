@@ -3,7 +3,7 @@ token/*
 token_cache.bin
 
 # user files
-temp/*
+doc/*
 
 # docker files
 data/*
