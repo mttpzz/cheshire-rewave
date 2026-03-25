@@ -1,5 +1,7 @@
 import logging
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from logging.handlers import RotatingFileHandler
 
 
@@ -22,8 +24,11 @@ def get_plugin_logger(plugin_name: str) -> logging.Logger:
     if not logger.handlers:
         logger.setLevel(logging.INFO)
 
-        # formatting the logger
+        # formatting the logger with italian time
         formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+        formatter.formatTime = lambda record, datefmt=None: datetime.fromtimestamp(
+            record.created, tz=ZoneInfo("Europe/Rome")
+            ).strftime(datefmt or "%Y-%m-%d %H:%M:%S %Z")
 
         # logger filename and path
         log_file_path = os.path.join(plugin_dir, f"{plugin_name}.log")
