@@ -130,7 +130,7 @@ def _sync_documents(cat) -> str:
             metadata = {
                 "filename": filename,
                 "indexed_at": datetime.now(tz=ZoneInfo("Europe/Rome")).isoformat(timespec="seconds"),
-                "source": "documents_sync_plugin",
+                "source": filename,
             }
 
             _ingest_file(cat, filepath, filename, content_type, metadata)

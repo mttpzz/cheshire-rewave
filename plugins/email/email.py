@@ -16,6 +16,15 @@ log = get_plugin_logger("email")
 
 
 # --- FORMATTING, FETCHING AND SENDING EMAILS -----------------------------------------------------------------------------------
+def get_email_address(user_id):
+    """
+    Returns the email address of the user_id. If 'admin' returns matteo@rewave.it
+    """
+    if user_id == 'admin':
+        return 'matteo@rewave.it'
+    return user_id + "@rewave.it"
+
+
 def format_emails(response):
     """
     Format the email data retrieved from the Microsoft Graph API into a readable string format.
@@ -146,12 +155,6 @@ def email_reader(input_prompt, cat):
     """
     log.info("Starting reading mail plugin.")
     cat.send_ws_message("Lettura email in corso...")
-
-    # get email address from settings
-    settings = cat.mad_hatter.get_plugin().load_settings()
-    email_address = settings['email_address']
-    if not email_address:
-        return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
     
     # retrieve number of emails to fetch from the text query (default is 1)
     prompt = f"""
@@ -159,9 +162,10 @@ def email_reader(input_prompt, cat):
         Answer ONLY with the number as an integer, without any additional text or punctuation. If you can't find any number, answer '1'.
     """
     num_emails = cat.llm(prompt)
-
+    
     # download emails
     user_id = cat.user_id
+    email_address = get_email_address(user_id)
     msal_app, save_cache = create_msal_app(user_id)
     token = get_access_token(cat, msal_app, save_cache)
     direct_output = fetch_emails(token, email_address, num_emails)
@@ -191,15 +195,10 @@ def email_sender(input_json, cat):
     except Exception as e:
         log.error(f"❌ Error while parsing input: {str(e)}.")
         return f"❌ Errore nel formato dei dati. Riprova."
-    
-    # get email address from settings
-    settings = cat.mad_hatter.get_plugin().load_settings()
-    sender_email = settings['email_address']
-    if not sender_email:
-        return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
 
     # sending email
     user_id = cat.user_id
+    sender_email = get_email_address(user_id)
     msal_app, save_cache = create_msal_app(user_id)
     token = get_access_token(cat, msal_app, save_cache)
     direct_output = send_email(token, sender_email, to, subject, body)
@@ -218,14 +217,9 @@ def email_classifier(input_topic, cat):
     log.info("Starting classifing mail plugin.")
     cat.send_ws_message(f"Verifico se l'argomento dell'ultima email ricevuta riguarda {input_topic}...")
 
-    # get email address from settings
-    settings = cat.mad_hatter.get_plugin().load_settings()
-    target_email = settings['email_address']
-    if not target_email:
-        return f"❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
-
     # download the last email
     user_id = cat.user_id
+    target_email = get_email_address(user_id)
     msal_app, save_cache = create_msal_app(user_id)
     token = get_access_token(cat, msal_app, save_cache)
     last_email = fetch_emails(token, target_email, 1)
@@ -338,15 +332,8 @@ class EmailReplyForm(CatForm):
 
         try:
             if email_number != 0:
-                # get email address from settings
-                settings = cat.mad_hatter.get_plugin().load_settings()
-                sender_email = settings['email_address']
-                
-                if not sender_email:
-                    self.error_msg = "❌ Problema con l'indirizzo mail. Prova a inserirlo nuovamente nelle impostazioni."
-                    return
-                
                 # download the last email
+                sender_email = get_email_address(self.user_id)
                 msal_app, save_cache = create_msal_app(self.user_id)
                 token = get_access_token(cat, msal_app, save_cache)
                 last_emails = fetch_emails(token, sender_email, email_number)

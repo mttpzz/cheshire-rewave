@@ -2,6 +2,6 @@
     "name": "Mail and Cal Manager",
     "description": "Reading, writing emails and reply to emails; get, create and delete events.",
     "author_name": "7pm",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "tags": "email,calendar,outlook"
 }
