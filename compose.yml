@@ -7,6 +7,7 @@ services:
       POSTGRES_USER: litellm
       POSTGRES_PASSWORD: litellm_password
       POSTGRES_DB: litellm_db
+    restart: unless-stopped
     networks:
       - cat-network
 
@@ -14,6 +15,7 @@ services:
   redis:
     image: redis:alpine
     container_name: litellm_redis
+    restart: unless-stopped
     networks:
       - cat-network
 
@@ -36,6 +38,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     command: ["--config", "/app/config.yaml", "--port", "4000"]
+    restart: unless-stopped
     networks:
       - cat-network
 
@@ -56,6 +59,9 @@ services:
       - ./logs:/app/cat/logs  # logs folder
     env_file:
       - .env  # no file .env in the container — Docker reads the values and writes them directly as environment variables
+    depends_on:
+      - litellm # ensure the core starts after the proxy to allow it to connect to the proxy at startup
+    restart: unless-stopped
     networks:
       - cat-network # connect to the same network of litellm to allow communication
 
