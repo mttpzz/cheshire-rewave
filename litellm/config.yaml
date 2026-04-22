@@ -1,0 +1,26 @@
+general_settings:
+  store_model_in_db: true
+  store_prompts_in_spend_logs: true
+
+litellm_settings:
+  # set_verbose: True # to show in the container logs the routing decisions and the model metadata, useful for debugging and monitoring
+  drop_params: True # to avoid errors if a provider does not accept certain parameters
+
+model_list:
+  - model_name: cat-router
+    litellm_params:
+      model: openai/gpt-5-mini
+      api_key: "os.environ/OPENAI_API_KEY"
+
+  - model_name: cat-router
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+
+  # - model_name: cat-router
+  #   litellm_params:
+  #     model: gemini/gemini-2.5-pro
+  #     api_key: "os.environ/GEMINI_API_KEY"
+
+router_settings:
+  routing_strategy: cost-based-routing

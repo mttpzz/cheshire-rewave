@@ -1,4 +1,43 @@
 services:
+  # dashboard and logs database
+  db:
+    image: postgres:16-alpine
+    container_name: litellm_db
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm_password
+      POSTGRES_DB: litellm_db
+    networks:
+      - cat-network
+
+  # cache for routing decisions and model metadata (optional but recommended)
+  redis:
+    image: redis:alpine
+    container_name: litellm_redis
+    networks:
+      - cat-network
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm_proxy
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml
+    depends_on:
+      - db
+      - redis
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY} # proxy password
+      - DATABASE_URL=postgresql://litellm:litellm_password@db:5432/litellm_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    networks:
+      - cat-network
 
   cheshire-cat-core:
     image: ghcr.io/cheshire-cat-ai/core:latest
@@ -17,3 +56,9 @@ services:
       - ./logs:/app/cat/logs  # logs folder
     env_file:
       - .env  # no file .env in the container — Docker reads the values and writes them directly as environment variables
+    networks:
+      - cat-network # connect to the same network of litellm to allow communication
+
+networks:
+  cat-network:
+    driver: bridge
