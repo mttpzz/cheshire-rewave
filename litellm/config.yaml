@@ -3,8 +3,10 @@ general_settings:
   store_prompts_in_spend_logs: true
 
 litellm_settings:
-  # set_verbose: True # to show in the container logs the routing decisions and the model metadata, useful for debugging and monitoring
-  drop_params: True # to avoid errors if a provider does not accept certain parameters
+  # set_verbose: True
+  drop_params: True
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
 
 model_list:
   - model_name: cat-router

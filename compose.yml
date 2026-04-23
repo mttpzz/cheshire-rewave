@@ -37,6 +37,11 @@ services:
       - DATABASE_URL=postgresql://litellm:litellm_password@db:5432/litellm_db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_HOST=${LANGFUSE_HOST}
+      # - LITELLM_LOG=DEBUG
+      # - LANGFUSE_DEBUG=True
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
     networks:
