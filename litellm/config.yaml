@@ -21,7 +21,7 @@ model_list:
 
   # - model_name: cat-router
   #   litellm_params:
-  #     model: gemini/gemini-2.5-pro
+  #     model: gemini/gemini-2.5-flash
   #     api_key: "os.environ/GEMINI_API_KEY"
 
 router_settings:

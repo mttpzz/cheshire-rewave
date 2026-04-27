@@ -1,4 +1,5 @@
 services:
+  # --- LITELLM -----------------------------------------------------------------------------------
   # dashboard and logs database
   db:
     image: postgres:16-alpine
@@ -47,6 +48,8 @@ services:
     networks:
       - cat-network
 
+
+  # --- CHESHIRE CAT ------------------------------------------------------------------------------
   cheshire-cat-core:
     image: ghcr.io/cheshire-cat-ai/core:latest
     container_name: cheshire_cat_core
@@ -65,10 +68,11 @@ services:
     env_file:
       - .env  # no file .env in the container — Docker reads the values and writes them directly as environment variables
     depends_on:
-      - litellm # ensure the core starts after the proxy to allow it to connect to the proxy at startup
+      - litellm
     restart: unless-stopped
     networks:
       - cat-network # connect to the same network of litellm to allow communication
+
 
 networks:
   cat-network:
