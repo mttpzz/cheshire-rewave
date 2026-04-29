@@ -1,0 +1,25 @@
+{
+    auto_https disable_redirects    # uncomment on windows to auto redirect http to https, because port 80 is often used by other applications
+}
+
+(secure_headers) {
+    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}
+
+cat.rewave.local {
+    tls internal
+    import secure_headers
+    reverse_proxy cheshire-cat-core:80 {
+        header_up X-Forwarded-Proto https
+    }
+}
+
+litellm.rewave.local {
+    tls internal
+    import secure_headers
+    reverse_proxy litellm:4000 {
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-Host {host}
+        header_down Location "http://litellm.rewave.local" "https://litellm.rewave.local"
+    }
+}

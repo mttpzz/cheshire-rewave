@@ -8,6 +8,9 @@ doc/*
 # docker files
 data/*
 
+# certificates
+caddy-root.crt
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

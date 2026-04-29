@@ -23,8 +23,8 @@ services:
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: litellm_proxy
-    ports:
-      - "4000:4000"
+    # ports:
+    #   - "4000:4000"
     volumes:
       - ./litellm/config.yaml:/app/config.yaml
     depends_on:
@@ -43,6 +43,7 @@ services:
       - LANGFUSE_HOST=${LANGFUSE_HOST}
       # - LITELLM_LOG=DEBUG
       # - LANGFUSE_DEBUG=True
+      - FORWARDED_ALLOW_IPS=*
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     restart: unless-stopped
     networks:
@@ -53,8 +54,8 @@ services:
   cheshire-cat-core:
     image: ghcr.io/cheshire-cat-ai/core:latest
     container_name: cheshire_cat_core
-    ports:
-      - ${CORE_PORT:-1865}:80
+    # ports:
+    #   - ${CORE_PORT:-1865}:80
     environment:
       - PYTHONUNBUFFERED=1
       - WATCHFILES_FORCE_POLLING=true
@@ -74,6 +75,29 @@ services:
       - cat-network # connect to the same network of litellm to allow communication
 
 
+  # --- REVERSE PROXY -----------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    ports:
+      # - "80:80" # comment on windows because port 80 is often used by other applications
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - cheshire-cat-core
+      - litellm
+    restart: unless-stopped
+    networks:
+      - cat-network
+
+
 networks:
   cat-network:
     driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
