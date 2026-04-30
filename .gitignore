@@ -8,8 +8,8 @@ doc/*
 # docker files
 data/*
 
-# certificates
-caddy-root.crt
+# caddy certificates
+caddy-root.crt*
 
 
 # Byte-compiled / optimized / DLL files
