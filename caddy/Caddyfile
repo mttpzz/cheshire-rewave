@@ -1,6 +1,6 @@
-# {
-#     auto_https disable_redirects    # uncomment on windows to auto redirect http to https, because port 80 is often used by other applications
-# }
+{
+    auto_https disable_redirects    # uncomment on windows to auto redirect http to https, because port 80 is often used by other applications
+}
 
 (secure_headers) {
     header Strict-Transport-Security "max-age=31536000; includeSubDomains"

@@ -24,7 +24,10 @@ def before_cat_recalls_declarative_memories(default_declarative_recall_config, c
     settings = cat.mad_hatter.get_plugin().load_settings()
     default_declarative_recall_config["k"] = settings["declarative_memory_k"]
     default_declarative_recall_config["threshold"] = settings["declarative_memory_threshold"]
-
+    # filter Qdrant: only docs of current user
+    default_declarative_recall_config["metadata"] = {
+        "user_id": cat.user_id
+    }
     return default_declarative_recall_config
 
 
