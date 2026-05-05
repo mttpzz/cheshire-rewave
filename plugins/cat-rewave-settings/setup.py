@@ -20,11 +20,20 @@ def before_cat_recalls_episodic_memories(default_episodic_recall_config, cat):
 
 
 @hook
+def before_rabbithole_insert_memory(doc, cat):
+    # tag every ingested chunk (files, URLs, raw text, ...) with user_id
+    # so declarative recall metadata filter isolates per-user content
+    if doc.metadata is None:
+        doc.metadata = {}
+    doc.metadata["user_id"] = cat.user_id
+    return doc
+
+@hook
 def before_cat_recalls_declarative_memories(default_declarative_recall_config, cat):
     settings = cat.mad_hatter.get_plugin().load_settings()
     default_declarative_recall_config["k"] = settings["declarative_memory_k"]
     default_declarative_recall_config["threshold"] = settings["declarative_memory_threshold"]
-    # filter Qdrant: only docs of current user
+    # filter only docs of current user
     default_declarative_recall_config["metadata"] = {
         "user_id": cat.user_id
     }

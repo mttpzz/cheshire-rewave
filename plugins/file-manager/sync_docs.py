@@ -236,3 +236,82 @@ def sync_documents(tool_input: str, cat) -> str:
     except Exception as e:
         log.error(f"❌ Tool error: {e}")
         return f"❌ Errore durante la sincronizzazione: {str(e)}"
+
+
+# --- TOOL: LIST RAG SOURCES ----------------------------------------------------------------------------------------------------
+def _classify_source(src: str, md: dict) -> str:
+    if src.startswith(("http://", "https://")):
+        return "url"
+    if src.startswith("text:"):
+        return "text"
+    ext = os.path.splitext(src)[1].lower()
+    if ext in DOCS_EXT or md.get("filename"):
+        return "file"
+    return "other"
+
+
+@tool(
+    return_direct=True,
+    examples=[
+        "che cosa hai indicizzato",
+        "elenca tutto nel rag",
+        "lista contenuti caricati",
+        "cosa c'è nella memoria",
+        "che documenti hai indicizzato",
+    ],
+)
+def list_indexed_documents(tool_input: str, cat) -> str:
+    """
+    List everything indexed in the user's declarative memory (RAG): files, URLs, raw text.
+    Use when the user asks: what's in the RAG, list indexed content, show my documents/links/notes.
+    """
+    user_id = cat.user_id
+    log.info(f"Listing indexed content for user '{user_id}'.")
+    try:
+        all_points, _ = cat.memory.vectors.declarative.get_all_points()
+
+        items: dict[str, dict] = {}
+        for p in all_points:
+            md = p.payload.get("metadata", {}) or {}
+            if md.get("user_id") != user_id:
+                continue
+
+            src = md.get("source") or md.get("filename") or md.get("url")
+            if not src:
+                content = p.payload.get("page_content", "")
+                src = f"text:{content[:40].strip()}…" if content else "unknown"
+
+            kind = _classify_source(src, md)
+            entry = items.setdefault(src, {
+                "kind": kind,
+                "chunks": 0,
+                "indexed_at": md.get("indexed_at") or md.get("when"),
+            })
+            entry["chunks"] += 1
+            ts = md.get("indexed_at") or md.get("when")
+            if ts and (not entry["indexed_at"] or ts > entry["indexed_at"]):
+                entry["indexed_at"] = ts
+
+        if not items:
+            return "📂 Nessun contenuto indicizzato."
+
+        groups: dict[str, list[tuple[str, dict]]] = {}
+        for src, info in items.items():
+            groups.setdefault(info["kind"], []).append((src, info))
+
+        icons = {"file": "📄", "url": "🔗", "text": "📝", "other": "❔"}
+        order = ["file", "url", "text", "other"]
+
+        lines = [f"📚 Contenuti indicizzati ({len(items)}):", ""]
+        for kind in order:
+            if kind not in groups:
+                continue
+            lines.append(f"**{icons[kind]} {kind.upper()}** ({len(groups[kind])})")
+            for src, info in sorted(groups[kind]):
+                indexed = info["indexed_at"] or "?"
+                lines.append(f"• {src} — {info['chunks']} chunk · {indexed}")
+            lines.append("")
+        return "\n".join(lines).rstrip()
+    except Exception as e:
+        log.error(f"❌ List tool error: {e}")
+        return f"❌ Errore durante l'elenco: {str(e)}"
