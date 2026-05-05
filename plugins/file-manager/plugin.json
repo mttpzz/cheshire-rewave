@@ -1,7 +1,7 @@
 {
     "name": "File Manager",
-    "description": "Create, write, read, rename, delete and list files in TXT, PDF or Word format based on what the user need.",
+    "description": "Managing files in TXT, PDF or Word format based on what the user needs and improving files upload into RAG.",
     "author_name": "7pm",
-    "version": "0.3.0",
-    "tags": "file,pdf,word,txt,read,write,list,rename,delete"
+    "version": "1.0.0",
+    "tags": "file,pdf,word,txt,read,write,rename,delete,list,rag"
 }

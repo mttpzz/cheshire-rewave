@@ -9,6 +9,14 @@
 cat.rewave.local {
     tls internal
     import secure_headers
+
+    # Cat (FastAPI) routes use trailing slash. Rewrite known endpoints
+    # to avoid 307 redirects that break POST/upload from admin UI.
+    @needs_slash {
+        path /rabbithole /plugins /memory /settings /llm /embedder /auth /users
+    }
+    rewrite @needs_slash {path}/
+
     reverse_proxy cheshire-cat-core:80 {
         header_up X-Forwarded-Proto https
     }

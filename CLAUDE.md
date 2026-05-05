@@ -10,8 +10,11 @@ Self-hosted deployment of [Cheshire Cat AI](https://cheshirecat.ai/) customized 
 - **litellm** (`litellm_proxy`, port 4000) — LLM gateway. Config at `litellm/config.yaml` defines a single `cat-router` model with multiple backends (OpenAI, Anthropic, optionally Gemini). `routing_strategy: cost-based-routing` picks the cheapest available backend per call. Point the Cat admin UI at `http://litellm:4000` with `${LITELLM_MASTER_KEY}`.
 - **db** — Postgres 16, stores LiteLLM spend logs / model metadata.
 - **redis** — LiteLLM routing/model cache.
+- **caddy** — Reverse proxy (`caddy:2-alpine`), terminates TLS on `:443` with internal CA. Hosts: `cat.rewave.local` → `cheshire-cat-core:80`, `litellm.rewave.local` → `litellm:4000`, `cat.files.local` → `host.docker.internal:8080` (external Filebrowser on Ubuntu host). Port 80 not published on Windows (often busy); `auto_https disable_redirects` set. Cat endpoints needing trailing slash (`/rabbithole`, `/plugins`, `/memory`, `/settings`, `/llm`, `/embedder`, `/auth`, `/users`) are rewritten to avoid 307s breaking POST/upload from admin UI. Trust roots in `caddy/caddy-root.crt_*` for client install.
 
 All services share the `cat-network` bridge, so plugins/Cat reach LiteLLM at `http://litellm:4000`.
+
+LiteLLM also wires Langfuse observability via optional `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` env.
 
 ## Common commands
 
@@ -40,19 +43,18 @@ Each plugin follows the Cat convention: `plugin.json` metadata + a Python module
 |---|---|---|
 | `cat-rewave-settings` | Overrides core prompt + memory recall params (k/threshold for episodic/declarative/procedural). Also creates+announces per-user doc folder on first message. | `settings.py` (`MySettings`), `setup.py` (`agent_prompt_prefix`, `agent_prompt_suffix`, `before_cat_recalls_*_memories`, `before_cat_reads_message`, `get_folder_link`) |
 | `email` | Microsoft Graph mail + calendar via MSAL device-flow auth, per-user token cache at `plugins/email/token/<user_id>/token_cache.bin`. | `email.py` (tools: `email_reader`, `email_sender`, `email_classifier`, `schedule_email_classifier`; form: `EmailReplyForm`), `calendar.py` (`get_upcoming_events`, `create_calendar_event`, `search_calendar_events`, `delete_calendar_event`), `auth.py` (`create_msal_app`, `get_access_token`) |
-| `file-manager` | CRUD on user files (PDF via FPDF, DOCX via python-docx, TXT) + declarative-memory sync. | `file-manager.py` (`create_file`, `list_files`, `read_file`, `rename_file`, `delete_file`), `sync_docs.py` (`sync_documents` tool + `after_cat_bootstrap` hook) |
+| `file-manager` | CRUD on user files (PDF via FPDF, DOCX via python-docx, TXT) + Docling-based RAG ingestion. | `file-manager.py` (`create_file`, `list_files`, `read_file`, `rename_file`, `delete_file`), `rag_helper.py` (`list_indexed_documents` tool, `DoclingMarkdownParser`, `rabbithole_instantiates_parsers` + `after_cat_bootstrap` hooks) |
 | `vanna` | Text-to-SQL over a MySQL DB using Vanna AI with a Qdrant vector store. | `main.py` (`MyVanna`, `execute_sql_query`) |
 | `web-search` | DuckDuckGo search fallback via `ddgs`. | `main.py` (`web_search`) |
 
-### Declarative memory sync (`file-manager/sync_docs.py`)
+### RAG ingestion (`file-manager/rag_helper.py`)
 
-On Cat bootstrap (and on demand via the `sync_documents` tool), the shared `doc/` folder is reconciled with the Cat's declarative vector memory:
+PDF/DOCX/DOC uploads hit `DoclingMarkdownParser` (registered via `rabbithole_instantiates_parsers`) instead of the Cat's default loaders — Docling converts → markdown before chunking, preserving tables/headings. `DocumentConverter` is heavy (loads ML models on first call), so:
 
-1. Files listed in `doc/index_registry/shared_registry.json` but missing from disk → their points are deleted from `cat.memory.vectors.declarative` (matched by `metadata.filename`).
-2. New supported files (`.txt .pdf .docx .md .csv`) → ingested via `cat.rabbit_hole.ingest_file(...)` with `metadata = {filename, indexed_at (Europe/Rome), source}`.
-3. Registry updated with per-file `size_kb`, `type`, `indexed_at`.
+- `_get_converter()` is a lazy singleton across all uploads.
+- `after_cat_bootstrap` warms it at boot to avoid timing out the proxy on the first chat upload.
 
-Registry path lives under `BASE_FOLDER_CAT/index_registry/` (container) → `./doc/index_registry/` on host.
+Per-user RAG isolation is enforced at recall time (see `cat-rewave-settings`): each declarative point's `metadata.user_id` filters listing/recall. The `list_indexed_documents` tool groups a user's points by source kind (file/url/text) using `metadata.source | filename | url` and reports chunk counts + last `indexed_at` (Europe/Rome).
 
 ### Email plugin auth flow
 
@@ -65,6 +67,7 @@ Required by `compose.yml` / plugins:
 - `CORE_PORT` (optional, default 1865)
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` — passed to `litellm`
 - `LITELLM_MASTER_KEY` — LiteLLM admin / client auth
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` — optional, for LiteLLM tracing
 - `CLIENT_ID`, `CLIENT_SECRET`, `TENANT_ID` — MS Graph app registration (email plugin)
 - `BASE_FOLDER_CAT` (container path, e.g. `cat/doc`), `BASE_FOLDER_USER` (host-facing URL/path used in chat links)
 - `LOG_FOLDER`
@@ -78,3 +81,5 @@ Required by `compose.yml` / plugins:
 - `cat-rewave-settings/setup.py` overrides the core `agent_prompt_prefix`/`agent_prompt_suffix`. Live prompt text sits in `plugins/cat-rewave-settings/settings.json` (Italian, ReWave-specific), not in source — edit it via admin UI or that file.
 - Plugin imports use `# type: ignore` on `cat.*` imports because the Cat SDK isn't installed in the local venv; they resolve only inside the container.
 - `logs/` has a timezone convention (Europe/Rome) set per-plugin via `ZoneInfo`; keep it when adding new log timestamps.
+- Cat & LiteLLM container ports are commented out in `compose.yml` — traffic goes through Caddy by hostname. To bypass Caddy for local dev, uncomment the `ports:` block (and add `cat.rewave.local`/`litellm.rewave.local` to your hosts file when using TLS).
+- Docling models download on first conversion (~hundreds of MB); `after_cat_bootstrap` in `rag_helper.py` pre-loads them so first user upload doesn't hang the proxy.
