@@ -1,9 +1,11 @@
 # token folders and files
-token/*
-token_cache.bin
+token/
 
 # user files
 doc/*
+
+# logs files
+logs/*
 
 # docker files
 data/*

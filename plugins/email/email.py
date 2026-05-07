@@ -36,10 +36,11 @@ def format_emails(response):
     for i, email in enumerate(emails, 1):
         date = email.get('receivedDateTime', '')
         subject = email.get('subject', 'Nessun oggetto')
-        sender_name = email.get('from', {}).get('emailAddress', {}).get('name', 'Sconosciuto')
-        sender_address = email.get('from', {}).get('emailAddress', {}).get('address', 'Sconosciuto')
+        sender_addr_data = (email.get('from') or {}).get('emailAddress') or {}
+        sender_name = sender_addr_data.get('name', 'Sconosciuto')
+        sender_address = sender_addr_data.get('address', 'Sconosciuto')
         is_read = email.get('isRead', False)
-        body_data = email.get('body', {})
+        body_data = email.get('body') or {}
         
         # body from html to text
         if body_data.get('contentType') == 'html':
@@ -50,19 +51,18 @@ def format_emails(response):
 
         # toRecipients is a list
         recipients_data = email.get('toRecipients', [])
-        if recipients_data:
-            recipients_list = [
-                r.get('emailAddress', {}).get('name') + ": " + r.get('emailAddress', {}).get('address') 
-                for r in recipients_data
-            ]
+        recipients_list = [
+            f"{(r.get('emailAddress') or {}).get('name') or '?'}: {(r.get('emailAddress') or {}).get('address') or '?'}"
+            for r in recipients_data
+        ]
         recipients_str = ", ".join(recipients_list) if recipients_list else "Nessuno"
-        
+
         format_output += f"\n📧 EMAIL {i}" \
             f"\n📅 DATA: {date}" \
             f"\n👤 DA: {sender_name}: {sender_address}" \
             f"\n📮 A: {recipients_str}" \
             f"\n📝 OGGETTO: {subject}" \
-            f"\n👁️  LETTA: {'✅ Sì' if {is_read} else '❌ No'}" \
+            f"\n👁️  LETTA: {'✅ Sì' if is_read else '❌ No'}" \
             f"\n📄 TESTO: {body[:2000]}"
         format_output += "\n- \n- \n-"
     
@@ -73,10 +73,7 @@ def fetch_emails(access_token, email_address, num_emails):
     """
     Fetching the latest emails from the target email address.
     """
-    headers = {
-        'Authorization': f'Bearer {access_token}',
-        'Content-Type': 'application/json'
-    }
+    headers = {'Authorization': f'Bearer {access_token}'}
 
     params = {
         '$top': num_emails,
@@ -97,9 +94,9 @@ def fetch_emails(access_token, email_address, num_emails):
 
         return format_emails(response)
     
-    except requests.exceptions.RequestException as e:
+    except (requests.exceptions.RequestException, ValueError) as e:
         log.error(f"❌ Error in fetching mails: {str(e)}")
-        return f"❌ Errore durante l'accesso alla casella di posta. Riprova."
+        return "❌ Errore durante l'accesso alla casella di posta. Riprova."
 
 
 def send_email(access_token, sender, to, subject, body):
@@ -143,14 +140,14 @@ def send_email(access_token, sender, to, subject, body):
     
     except requests.exceptions.RequestException as e:
         log.error(f"❌ Error in sending mails: {str(e)}")
-        return f"❌ Errore durante l'invio della mail. Riprova."
+        return "❌ Errore durante l'invio della mail. Riprova."
 
 
 # --- TOOL: EMAIL READ ----------------------------------------------------------------------------------------------------------
 @tool(return_direct=True, examples=['Leggi le ultime 5 mail', 'Quali sono le ultime 2 mail?'])
 def email_reader(input_prompt, cat):
     """
-    Use this Tool to return the last emails received in the inbox of the email address specified in the plugin settings.
+    Use this tool to return the last emails received in the inbox of the email address specified in the plugin settings.
     The input is a text prompt given by the user that should specifies how many emails to retrieve.
     """
     log.info("Starting reading mail plugin.")
@@ -158,17 +155,25 @@ def email_reader(input_prompt, cat):
     
     # retrieve number of emails to fetch from the text query (default is 1)
     prompt = f"""
-        Extract the main number refferring to the quantity of emails to fetch from the following sentence: {input_prompt}.
+        Extract the main number referring to the quantity of emails to fetch from the following sentence: {input_prompt}.
         Answer ONLY with the number as an integer, without any additional text or punctuation. If you can't find any number, answer '1'.
     """
-    num_emails = cat.llm(prompt)
+    llm_response = cat.llm(prompt)
+    try:
+        num_emails = max(1, min(int(llm_response.strip()), 10))  # clamp 1-10
+    except (ValueError, AttributeError):
+        num_emails = 1
     
     # download emails
     user_id = cat.user_id
     email_address = get_email_address(user_id)
     msal_app, save_cache = create_msal_app(user_id)
     token = get_access_token(cat, msal_app, save_cache)
+    if token is None:
+        return "❌ Autenticazione fallita. Riprova."
     direct_output = fetch_emails(token, email_address, num_emails)
+    if direct_output.startswith("❌"):
+        return direct_output
     direct_output += "\n 👉 Se vuoi che ti proponga una possibile risposta a un'email, indicami il numero della mail. " \
             "\n 👉 Esempio: se vuoi che risponda all'email 3, chiedimi di proporre una risposta alla mail 3."
 
@@ -189,18 +194,23 @@ def email_sender(input_json, cat):
     # parsing input
     try:
         input_data = json.loads(input_json) if isinstance(input_json, str) else input_json
-        to = input_data.get("to", "").lower().strip()
-        subject = input_data.get("subject", "Nessun oggetto")
-        body = input_data.get("body", "")
+        to = (input_data.get("to") or "").lower().strip()
+        subject = input_data.get("subject") or "Nessun oggetto"
+        body = input_data.get("body") or ""
     except Exception as e:
         log.error(f"❌ Error while parsing input: {str(e)}.")
-        return f"❌ Errore nel formato dei dati. Riprova."
+        return "❌ Errore nel formato dei dati. Riprova."
+
+    if not to:
+        return "❌ Destinatario mancante. Specifica l'indirizzo email."
 
     # sending email
     user_id = cat.user_id
     sender_email = get_email_address(user_id)
     msal_app, save_cache = create_msal_app(user_id)
     token = get_access_token(cat, msal_app, save_cache)
+    if token is None:
+        return "❌ Autenticazione fallita. Riprova."
     direct_output = send_email(token, sender_email, to, subject, body)
 
     return direct_output
@@ -214,7 +224,7 @@ def email_classifier(input_topic, cat):
     Input MUST be a string specifying the topic to check in the last received email,
     for example: input_topic="corsi di sicurezza" or input_topic="cartotecnica".
     """
-    log.info("Starting classifing mail plugin.")
+    log.info("Starting classifying mail plugin.")
     cat.send_ws_message(f"Verifico se l'argomento dell'ultima email ricevuta riguarda {input_topic}...")
 
     # download the last email
@@ -222,12 +232,17 @@ def email_classifier(input_topic, cat):
     target_email = get_email_address(user_id)
     msal_app, save_cache = create_msal_app(user_id)
     token = get_access_token(cat, msal_app, save_cache)
+    if token is None:
+        return "❌ Autenticazione fallita. Riprova."
     last_email = fetch_emails(token, target_email, 1)
 
     # take only the email text from the output of fetch_emails
     start = "TESTO: "
-    end = "\n--------------------"
-    email_text = last_email.split(start)[1].split(end)[0].strip()
+    end = "\n- \n- \n-"
+    parts = last_email.split(start)
+    if len(parts) < 2:
+        return "⚠️ Nessuna email da classificare."
+    email_text = parts[1].split(end)[0].strip()
 
     # create a prompt for the LLM to classify if the email text is about the input topic or not, and answer only with "SÌ" or "NO"
     prompt = f"""
@@ -257,15 +272,23 @@ def email_classifier(input_topic, cat):
 @tool(return_direct=True, examples=["Controlla se l'ultima mail parla di cartotecnica ogni 30 secondi", "Ogni 60 secondi, verifica se l'ultima mail riguarda i corsi di sicurezza"])
 def schedule_email_classifier(tool_input, cat):
     """
-    This tool schedules the email_classifier Tool to run every given seconds, checking if the last email received is about a certain topic.
+    This tool schedules the email_classifier tool to run every given seconds, checking if the last email received is about a certain topic.
     Input MUST be a Python dictionary with the topic to check and the interval in seconds,
     for example: {"topic": "corsi di sicurezza", "interval": 60}
     """
-    input_obj = json.loads(tool_input)
-    topic = input_obj["topic"]
-    interval = input_obj["interval"]
+    try:
+        input_obj = json.loads(tool_input) if isinstance(tool_input, str) else tool_input
+        topic = input_obj["topic"]
+        interval = int(input_obj["interval"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        log.error(f"❌ Error while parsing schedule input: {str(e)}.")
+        return "❌ Formato input non valido. Esempio: {\"topic\": \"corsi\", \"interval\": 60}"
     
-    cat.white_rabbit.schedule_interval_job(job=email_classifier.run, seconds=int(interval), input_by_llm=topic, cat=cat)
+    try:
+        cat.white_rabbit.schedule_interval_job(job=email_classifier.run, seconds=interval, input_by_llm=topic, cat=cat)
+    except Exception as e:
+        log.error(f"❌ Error while scheduling: {str(e)}")
+        return "❌ Errore durante la schedulazione. Riprova."
 
     log.info(f"✅ Tool email_classifier scheduled. Every {interval} seconds it will check if the last email is about: {topic}.")
     return f"✅ Schedulazione avviata: ogni {interval} secondi controllerò se l'ultima mail riguarda {topic}."
@@ -296,7 +319,7 @@ class EmailReplyForm(CatForm):
         "Dimmi cosa rispondere alla mail 1"
     ]
     
-    stop_example = [
+    stop_examples = [
         "Non mandare la mail",
         "Annulla l'invio dell'email",
         "Non inviare l'e-mail",
@@ -331,16 +354,28 @@ class EmailReplyForm(CatForm):
         )
 
         try:
+            try:
+                email_number = int(email_number.strip())
+            except (ValueError, AttributeError):
+                email_number = 0
+            
             if email_number != 0:
                 # download the last email
                 sender_email = get_email_address(self.user_id)
                 msal_app, save_cache = create_msal_app(self.user_id)
                 token = get_access_token(cat, msal_app, save_cache)
+                if token is None:
+                    self.error_msg = "❌ Autenticazione Microsoft fallita. Riprova."
+                    return
                 last_emails = fetch_emails(token, sender_email, email_number)
 
                 # extract the email information
                 start_email = f"📧 EMAIL {email_number}"
-                email_data = last_emails.split(start_email)[1]
+                parts = last_emails.split(start_email)
+                if len(parts) < 2:
+                    self.error_msg = f"❌ Mail numero {email_number} non trovata. Riprova."
+                    return
+                email_data = parts[1]
                 
                 proposed_reply_str = cat.llm(
                     f"""Reply to the following email with a polite and extremely concise response (a single sentence or just a few words).
@@ -350,8 +385,8 @@ class EmailReplyForm(CatForm):
                         Email:
                         {email_data}
 
-                        Respond ONLY with a valid JSON which MUST contains the text of the received mail, the sender, the recipient, the subject reply and the text of the email to be sent as a reply,
-                        for example: {{"received_email": "Text of the received mail", "from": "sender@email.it", "to": "recipient@email.com", "subject": "Re: subject", "body": "Reply to the received email."}}
+                        Respond ONLY with a valid JSON containing: the original received mail text, the email address of who sent the received mail, the reply subject, and the reply body.
+                        Example: {{"received_email": "Text of the received mail", "original_sender_address": "sender@email.it", "subject": "Re: subject", "body": "Reply text."}}
                     """
                 )
                 
@@ -362,14 +397,14 @@ class EmailReplyForm(CatForm):
                     proposed_reply_str = re.sub(r'\s*```$', '', proposed_reply_str).strip()
                     
                     # from str to json
-                    proposed_reply = json.loads(proposed_reply_str) if isinstance(proposed_reply_str, str) else proposed_reply_str
+                    proposed_reply = json.loads(proposed_reply_str)
                     
                     # model data population
-                    self._model["email_received"] = proposed_reply.get("received_email", "")
-                    self._model["sender_email"] = proposed_reply.get("to", "").lower().strip()
-                    self._model["recipient_email"] = proposed_reply.get("from", "").lower().strip()
-                    self._model["email_subject"] = proposed_reply.get("subject", "")
-                    self._model["email_text"] = proposed_reply.get("body", "")
+                    self._model["email_received"] = proposed_reply.get("received_email") or ""
+                    self._model["sender_email"] = sender_email.lower().strip()
+                    self._model["recipient_email"] = (proposed_reply.get("original_sender_address") or "").lower().strip()
+                    self._model["email_subject"] = proposed_reply.get("subject") or ""
+                    self._model["email_text"] = proposed_reply.get("body") or ""
                 except Exception as e:
                     log.error(f"❌ Error while parsing the proposed reply: {str(e)}.")
                     self.error_msg = "❌ Problema durante la lettura della mail ricevuta. Riprova."
@@ -384,7 +419,14 @@ class EmailReplyForm(CatForm):
             self.error_msg = "❌ Problema durante la creazione della mail di risposta. Riprova."
             return
 
-    
+
+    def update(self):
+        # Skip CatForm's LLM-based extraction: re-parsing the chat history would let the LLM
+        # swap sender/recipient back (the original email text in context biases it). Model is
+        # already populated deterministically in __init__, so just re-validate.
+        self.validate()
+
+
     def message(self):    
         # check if the form is closed
         if self._state == CatFormState.CLOSED:
@@ -425,6 +467,7 @@ class EmailReplyForm(CatForm):
         # sending the email
         msal_app, save_cache = create_msal_app(self.user_id)
         token = get_access_token(self._cat, msal_app, save_cache)
-        send_email(token, form_data["sender_email"], "matteo@rewave.it", form_data["email_subject"], form_data["email_text"])   # TODO change target email with form_data["recipient_email"]
-        
-        return {"output": "✅ Email inviata!"}
+        if token is None:
+            return {"output": "❌ Autenticazione fallita. Riprova."}
+        result = send_email(token, form_data["sender_email"], "matteo@rewave.it", form_data["email_subject"], form_data["email_text"])   # TODO change target email with form_data["recipient_email"]
+        return {"output": result}

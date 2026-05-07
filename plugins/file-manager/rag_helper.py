@@ -7,17 +7,19 @@ import tempfile
 import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import html
 
 
 # --- LOGGER --------------------------------------------------------------------------------------------------------------------
 log = get_plugin_logger("file-manager")
 
 
-# --- ENV / CONST ---------------------------------------------------------------------------------------------------------------
+# --- CONST ---------------------------------------------------------------------------------------------------------------------
 DOCS_EXT = {
     ".txt": "text/plain",
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
     ".md": "text/markdown",
     ".csv": "text/csv",
 }
@@ -88,9 +90,13 @@ def list_indexed_documents(tool_input: str, cat) -> str:
             })
             entry["chunks"] += 1
             ts = md.get("indexed_at") or md.get("when")
-            if ts and (not entry["indexed_at"] or ts > entry["indexed_at"]):
-                entry["indexed_at"] = ts
-
+            if ts:
+                try:
+                    if not entry["indexed_at"] or float(ts) > float(entry["indexed_at"]):
+                        entry["indexed_at"] = ts
+                except (ValueError, TypeError):
+                    pass  # keep existing value if unparseable
+        
         if not items:
             return "📂 Nessun contenuto indicizzato."
 
@@ -108,13 +114,13 @@ def list_indexed_documents(tool_input: str, cat) -> str:
             lines.append(f"**{icons[kind]} {kind.upper()}** ({len(groups[kind])})")
             for src, info in sorted(groups[kind]):
                 indexed = _fmt_ts(info["indexed_at"])
-                label = f'<a href="{src}" target="_blank" rel="noopener noreferrer">{src}</a>' if kind == "url" else src
+                label = f'<a href="{html.escape(src, quote=True)}" target="_blank" rel="noopener noreferrer">{html.escape(src)}</a>' if kind == "url" else html.escape(src)
                 lines.append(f"• {label} — {info['chunks']} chunk · {indexed}")
             lines.append("")
         return "\n".join(lines).rstrip()
     except Exception as e:
         log.error(f"❌ List tool error: {e}")
-        return f"❌ Errore durante l'elenco: {str(e)}"
+        return "❌ Errore durante l'elenco. Riprova."
 
 
 # --- DOCLING PARSER ------------------------------------------------------------------------------------------------------------

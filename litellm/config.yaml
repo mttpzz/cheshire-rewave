@@ -7,6 +7,8 @@ litellm_settings:
   drop_params: True
   success_callback: ["langfuse"]
   failure_callback: ["langfuse"]
+  request_timeout: 60
+  num_retries: 2
 
 model_list:
   - model_name: cat-router
@@ -26,3 +28,6 @@ model_list:
 
 router_settings:
   routing_strategy: cost-based-routing
+  fallbacks: [{"cat-router": ["cat-router"]}]
+  allowed_fails: 2
+  cooldown_time: 30

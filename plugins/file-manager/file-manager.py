@@ -6,6 +6,7 @@ from datetime import datetime
 from fpdf import FPDF
 from pypdf import PdfReader
 from docx import Document
+import html
 
 
 # --- LOGGER --------------------------------------------------------------------------------------------------------------------
@@ -24,8 +25,7 @@ def get_user_path(cat, folder, filename=None):
     user_id = cat.user_id
     base_path = os.path.join(folder, user_id)
     
-    if not os.path.exists(base_path):
-        os.makedirs(base_path)
+    os.makedirs(base_path, exist_ok=True)
         
     if filename:
         # os.path.basename impedisce attacchi di tipo path traversal
@@ -48,31 +48,42 @@ def create_file(input_json, cat):
     try:
         data = json.loads(input_json) if isinstance(input_json, str) else input_json
         file_text = data.get("text", "")
-        file_format = data.get("format", "pdf").lower().strip()
+        file_format = (data.get("format") or "pdf").lower().strip()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name = data.get("filename", f"doc_{timestamp}")
+        file_name = data.get("filename") or f"doc_{timestamp}"
     except Exception as e:
         log.error(f"❌ Error while parsing input: {str(e)}.")
-        return f"❌ Errore nel formato dei dati. Riprova."
+        return "❌ Errore nel formato dei dati. Riprova."
     
     # file creation
     try:
         if file_format == "pdf":
-            file_name += ".pdf"
-            full_path = get_user_path(cat, BASE_FOLDER_CAT, file_name)
-            
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
-            pdf.multi_cell(0, 10, txt=file_text)
-            pdf.output(full_path)
-            print(full_path)
+            try:
+                file_text.encode("cp1252")
+                file_name += ".pdf"
+                full_path = get_user_path(cat, BASE_FOLDER_CAT, file_name)
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Arial", size=12)
+                pdf.multi_cell(0, 10, text=file_text)
+                pdf.output(full_path)
+            except UnicodeEncodeError:
+                # fallback to DOCX (Unicode-safe) if the text contains characters that cannot be encoded in cp1252 (e.g., emojis, CJK, cyrillic)
+                log.warning("⚠️ Non-latin1 chars detected, switching PDF to DOCX.")
+                file_name += ".docx"
+                full_path = get_user_path(cat, BASE_FOLDER_CAT, file_name)
+
+                doc = Document()
+                for line in file_text.split("\n"):
+                    doc.add_paragraph(line)
+                doc.save(full_path)
         elif file_format in ["word", "docx"]:
             file_name += ".docx"
             full_path = get_user_path(cat, BASE_FOLDER_CAT, file_name)
 
             doc = Document()
-            doc.add_paragraph(file_text)
+            for line in file_text.split("\n"):
+                doc.add_paragraph(line)
             doc.save(full_path)
         else:   # txt files
             file_name += ".txt"
@@ -83,11 +94,11 @@ def create_file(input_json, cat):
     
     except Exception as e:
         log.error(f"❌ Error during file creation: {str(e)}.")
-        return f"❌ Errore durante la creazione del file. Riprova."
+        return "❌ Errore durante la creazione del file. Riprova."
 
     # folder for file access
     user_path = get_user_path(cat, BASE_FOLDER_USER)
-    user_path_link = f'<a href="{user_path}" target="_blank">{user_path}</a>'
+    user_path_link = f'<a href="{html.escape(user_path, quote=True)}" target="_blank">{html.escape(user_path)}</a>'
     
     return f"✅ Fatto! Puoi vedere il file **{file_name}** in questa cartella: {user_path_link}"
 
@@ -112,7 +123,7 @@ def list_files(_, cat):
     
     except Exception as e:
         log.error(f"❌ Error while listing the files in the folder: {str(e)}.")
-        return f"❌ Errore durante la lettura della cartella. Riprova."
+        return "❌ Errore durante la lettura della cartella. Riprova."
 
 
 # --- TOOL: FILE READ -----------------------------------------------------------------------------------------------------------
@@ -128,6 +139,8 @@ def read_file(input_json, cat):
     try:
         data = json.loads(input_json) if isinstance(input_json, str) else input_json
         filename = data.get("filename")
+        if not filename:
+            return "❌ Nome file mancante. Specifica il file da leggere."
         path = get_user_path(cat, BASE_FOLDER_CAT, filename)
 
         if os.path.exists(path):
@@ -137,10 +150,12 @@ def read_file(input_json, cat):
             if ext == "pdf":
                 reader = PdfReader(path)
                 for page in reader.pages:
-                    text_read += page.extract_text() + "\n"
-            elif ext in ["docx", "doc"]:
+                    text_read += (page.extract_text() or "") + "\n"
+            elif ext == "docx":
                 doc = Document(path)
                 text_read = "\n".join([para.text for para in doc.paragraphs])
+            elif ext == "doc":
+                return "⚠️ Il formato '.doc' non è supportato. Convertilo in '.docx' prima di leggerlo."
             else:            
                 with open(path, "r", encoding="utf-8") as f:
                     text_read = f.read()
@@ -154,7 +169,7 @@ def read_file(input_json, cat):
 
     except Exception as e:
         log.error(f"❌ Error while reading the file: {str(e)}")
-        return f"❌ Errore durante la lettura del file. Riprova."
+        return "❌ Errore durante la lettura del file. Riprova."
 
 
 # --- TOOL: FILE RENAME ---------------------------------------------------------------------------------------------------------
@@ -167,12 +182,18 @@ def rename_file(input_json, cat):
     """
     log.info("Starting file renaming tool.")
 
+    old_name = None
     try:
         data = json.loads(input_json) if isinstance(input_json, str) else input_json
         old_name = data.get("old_name")
         new_name = data.get("new_name")
+        if not old_name or not new_name:
+            return "❌ Nomi file mancanti. Specifica nome vecchio e nuovo."
         old_path = get_user_path(cat, BASE_FOLDER_CAT, old_name)
         new_path = get_user_path(cat, BASE_FOLDER_CAT, new_name)
+
+        if old_path == new_path:
+            return f"⚠️ Il nome '{new_name}' è già quello attuale."
         
         if os.path.exists(old_path):
             os.rename(old_path, new_path)
@@ -182,7 +203,7 @@ def rename_file(input_json, cat):
     
     except Exception as e:
         log.error(f"❌ Error while renaming the file '{old_name}': {str(e)}")
-        return f"❌ Errore durante la rinomina del file. Riprova."
+        return "❌ Errore durante la rinomina del file. Riprova."
 
 
 # --- TOOL: FILE DELETE ---------------------------------------------------------------------------------------------------------
@@ -195,9 +216,12 @@ def delete_file(input_json, cat):
     """
     log.info("Starting file deleting tool.")
 
+    filename = None
     try:
         data = json.loads(input_json) if isinstance(input_json, str) else input_json
         filename = data.get("filename")
+        if not filename:
+            return "❌ Nome file mancante. Specifica il file da eliminare."
         path = get_user_path(cat, BASE_FOLDER_CAT, filename)
         
         if os.path.exists(path):
@@ -208,4 +232,4 @@ def delete_file(input_json, cat):
     
     except Exception as e:
         log.error(f"❌ Error while deleting the file '{filename}': {str(e)}")
-        return f"❌ Errore durante l'eliminazione del file."
+        return "❌ Errore durante l'eliminazione del file."

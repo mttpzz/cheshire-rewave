@@ -1,5 +1,5 @@
 {
-    auto_https disable_redirects    # uncomment on windows to auto redirect http to https, because port 80 is often used by other applications
+    auto_https disable_redirects    # active on Windows (port 80 used by other apps); remove on Ubuntu to enable HTTP→HTTPS auto-redirect
 }
 
 (secure_headers) {

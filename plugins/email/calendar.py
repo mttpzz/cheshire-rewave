@@ -11,9 +11,9 @@ from .auth import create_msal_app, get_access_token
 log = get_plugin_logger("email")
 
 
-# --- GET AND POST CALENDAR EVENTS ----------------------------------------------------------------------------------------------
+# --- GET, POST AND DELETE CALENDAR EVENTS --------------------------------------------------------------------------------------
 def cal_get(endpoint: str, token: str) -> dict:
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {token}"}
     response = requests.get(f"https://graph.microsoft.com/v1.0/{endpoint}", headers=headers)
     response.raise_for_status()
     return response.json()
@@ -23,6 +23,11 @@ def cal_post(endpoint: str, payload: dict, token: str) -> dict:
     response = requests.post(f"https://graph.microsoft.com/v1.0/{endpoint}", headers=headers, json=payload)
     response.raise_for_status()
     return response.json()
+
+def cal_delete(endpoint: str, token: str) -> None:
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.delete(f"https://graph.microsoft.com/v1.0/{endpoint}", headers=headers)
+    response.raise_for_status()
 
 
 # --- TOOL: EVENTS OF NEXT N DAYS -----------------------------------------------------------------------------------------------
@@ -41,8 +46,9 @@ def get_upcoming_events(tool_input, cat):
         now = datetime.now(ZoneInfo("Europe/Rome"))
         end = now + timedelta(days=days)
 
-        start_str = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-        end_str = end.strftime("%Y-%m-%dT%H:%M:%SZ")
+        start_str = now.isoformat(timespec="seconds")
+        end_str = end.isoformat(timespec="seconds")
+
 
         endpoint = (
             f"me/calendarView"
@@ -55,6 +61,8 @@ def get_upcoming_events(tool_input, cat):
         # getting calendar events
         app, save_cache = create_msal_app(cat.user_id)
         token = get_access_token(cat, app, save_cache)
+        if token is None:
+            return "❌ Autenticazione Microsoft fallita. Riprova."
         data = cal_get(endpoint, token)
         events = data.get("value", [])
 
@@ -68,15 +76,15 @@ def get_upcoming_events(tool_input, cat):
             start_utc = datetime.fromisoformat(ev["start"]["dateTime"][:16].replace("T", " "))
             start = start_utc.astimezone(ZoneInfo("Europe/Rome")).strftime("%d/%m/%Y %H:%M")
             subject = ev.get("subject", "Senza titolo")
-            location = ev.get("location", {}).get("displayName", "")
+            location = (ev.get("location") or {}).get("displayName", "")
             loc_str = f" — 📍 {location}" if location else ""
             result += f"• **{start}** — {subject}{loc_str}\n"
 
         return result
 
     except Exception as e:
-        log.error(f"❌ Error while retriving events: {str(e)}")
-        return f"❌ Errore nel recupero eventi: {str(e)}"
+        log.error(f"❌ Error while retrieving events: {str(e)}")
+        return "❌ Errore nel recupero eventi. Riprova."
 
 
 # --- TOOL: NEW EVENT -----------------------------------------------------------------------------------------------------------
@@ -116,13 +124,15 @@ def create_calendar_event(tool_input, cat):
         # posting calendar events
         app, save_cache = create_msal_app(cat.user_id)
         token = get_access_token(cat, app, save_cache)
-        cal_post(f"me/events", payload, token)
+        if token is None:
+            return "❌ Autenticazione Microsoft fallita. Riprova."
+        cal_post("me/events", payload, token)
 
         return f"✅ Evento '{title}' creato il {date} dalle {start_time} alle {end_time}."
 
     except Exception as e:
         log.error(f"❌ Error while creating the event: {str(e)}")
-        return f"❌ Errore nella creazione dell'evento: {str(e)}"
+        return "❌ Errore nella creazione dell'evento. Riprova."
 
 
 # --- TOOL: SEARCHING EVENTS ----------------------------------------------------------------------------------------------------
@@ -144,13 +154,15 @@ def search_calendar_events(tool_input, cat):
         # getting calendar events
         endpoint = (
             f"me/calendarView"
-            f"?startDateTime={now.strftime('%Y-%m-%dT%H:%M:%SZ')}"
-            f"&endDateTime={end.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+            f"?startDateTime={now.isoformat(timespec='seconds')}"
+            f"&endDateTime={end.isoformat(timespec='seconds')}"
             f"&$select=subject,start,end,location"
             f"&$top=50"
         )
         app, save_cache = create_msal_app(cat.user_id)
         token = get_access_token(cat, app, save_cache)
+        if token is None:
+            return "❌ Autenticazione Microsoft fallita. Riprova."
         data = cal_get(endpoint, token)
         events = [
             e for e in data.get("value", [])
@@ -172,7 +184,7 @@ def search_calendar_events(tool_input, cat):
 
     except Exception as e:
         log.error(f"❌ Error while searching events: {str(e)}")
-        return f"❌ Errore nella ricerca degli eventi: {str(e)}"
+        return "❌ Errore nella ricerca degli eventi. Riprova."
 
 
 # --- TOOL: DELETING EVENTS -----------------------------------------------------------------------------------------------------
@@ -194,14 +206,16 @@ def delete_calendar_event(tool_input, cat):
         # getting calendar events
         endpoint = (
             f"me/calendarView"
-            f"?startDateTime={now.strftime('%Y-%m-%dT%H:%M:%SZ')}"
-            f"&endDateTime={end.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+            f"?startDateTime={now.isoformat(timespec='seconds')}"
+            f"&endDateTime={end.isoformat(timespec='seconds')}"
             f"&$select=id,subject,start"
             f"&$top=50"
         )
 
         app, save_cache = create_msal_app(cat.user_id)
         token = get_access_token(cat, app, save_cache)
+        if token is None:
+            return "❌ Autenticazione Microsoft fallita. Riprova."
         data = cal_get(endpoint, token)
 
         events = [
@@ -212,7 +226,14 @@ def delete_calendar_event(tool_input, cat):
         if not events:
             return f"⚠️ Nessun evento trovato con '{tool_input}' nei prossimi 90 giorni."
 
-        # it deletes always the first event, even if it finds more than 1
+        if len(events) > 1:
+            lines = [f"⚠️ Trovati {len(events)} eventi con '{tool_input}'. Specifica meglio la keyword:"]
+            for ev in events:
+                start_utc = datetime.fromisoformat(ev["start"]["dateTime"][:16].replace("T", " "))
+                start = start_utc.astimezone(ZoneInfo("Europe/Rome")).strftime("%d/%m/%Y %H:%M")
+                lines.append(f"• {start} — {ev.get('subject', 'Senza titolo')}")
+            return "\n".join(lines)
+        
         event = events[0]
         event_id = event["id"]
         # converting from utc to italy time zone
@@ -220,15 +241,10 @@ def delete_calendar_event(tool_input, cat):
         start = start_utc.astimezone(ZoneInfo("Europe/Rome")).strftime("%d/%m/%Y %H:%M")
         subject = event.get("subject", "Senza titolo")
 
-        headers = {"Authorization": f"Bearer {token}"}
-        response = requests.delete(
-            f"https://graph.microsoft.com/v1.0/me/events/{event_id}",
-            headers=headers
-        )
-        response.raise_for_status()
+        cal_delete(f"me/events/{event_id}", token)
 
         return f"🗑️ Evento '{subject}' del {start} cancellato con successo."
 
     except Exception as e:
         log.error(f"❌ Error deleting event: {str(e)}")
-        return f"❌ Errore durante la cancellazione dell'evento: {str(e)}"
+        return "❌ Errore durante la cancellazione dell'evento. Riprova."
