@@ -6,7 +6,7 @@ services:
     container_name: litellm_db
     environment:
       POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: litellm_password
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD}
       POSTGRES_DB: litellm_db
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U litellm -d litellm_db"]
@@ -48,7 +48,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY} # proxy password
-      - DATABASE_URL=postgresql://litellm:litellm_password@db:5432/litellm_db
+      - DATABASE_URL=postgresql://litellm:${LITELLM_DB_PASSWORD}@db:5432/litellm_db
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}

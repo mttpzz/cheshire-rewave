@@ -90,7 +90,7 @@ Per-user RAG isolation is enforced at recall time (see `cat-rewave-settings`): e
 
 ### Email plugin auth flow
 
-First use per user triggers MSAL device flow: `get_access_token` sends the `verification_uri` (clickable link, opens new tab) + `user_code` directly as a chat message via `cat.send_ws_message(..., msg_type='chat')`, then blocks on `acquire_token_by_device_flow` until the user authenticates, finally persists `token_cache.bin`. Subsequent calls reuse the cached token silently (with corrupt-cache fallback to a fresh device flow). User-to-mailbox mapping: `get_email_address(user_id)` → `<user_id>@rewave.it`, except `user_id == "admin"` → `matteo@rewave.it`.
+First use per user triggers MSAL device flow: `get_access_token` sends the `verification_uri` (clickable link, opens new tab) + `user_code` directly as a chat message via `cat.send_ws_message(..., msg_type='chat')`, then blocks on `acquire_token_by_device_flow` until the user authenticates, finally persists `token_cache.bin`. Subsequent calls reuse the cached token silently (with corrupt-cache fallback to a fresh device flow). User-to-mailbox mapping: `get_email_address(user_id)` → `<user_id>@rewave.it`, except `user_id == "admin"` → `<owner>@rewave.it`.
 
 ## Environment (`.env`)
 

@@ -18,10 +18,10 @@ log = get_plugin_logger("email")
 # --- FORMATTING, FETCHING AND SENDING EMAILS -----------------------------------------------------------------------------------
 def get_email_address(user_id):
     """
-    Returns the email address of the user_id. If 'admin' returns matteo@rewave.it
+    Returns the email address of the user_id. If 'admin' returns <owner>@rewave.it
     """
     if user_id == 'admin':
-        return 'matteo@rewave.it'
+        return '<owner>@rewave.it'
     return user_id + "@rewave.it"
 
 
@@ -181,12 +181,12 @@ def email_reader(input_prompt, cat):
 
 
 # --- TOOL: EMAIL WRITE ---------------------------------------------------------------------------------------------------------
-@tool(return_direct=True, examples=['Invia una mail a matteo@rewave.it con oggetto "Saluti" chiedendogli come sta'])
+@tool(return_direct=True, examples=['Invia una mail a test@rewave.it con oggetto "Saluti" chiedendogli come sta'])
 def email_sender(input_json, cat):
     """
     This Tool sends an email with given subject and body to a specified recipient.
     The input MUST be a Python dictionary which contains the recipient email address, the subject and the body of the email,
-    for example: {"to": "matteo@rewave.it", "subject": "Saluti", "body": "Ciao Matteo, come stai?"}
+    for example: {"to": "test@rewave.it", "subject": "Saluti", "body": "Ciao, come stai?"}
     """
     log.info("Starting sending mail plugin.")
     cat.send_ws_message("Invio email in corso...")
@@ -469,5 +469,5 @@ class EmailReplyForm(CatForm):
         token = get_access_token(self._cat, msal_app, save_cache)
         if token is None:
             return {"output": "❌ Autenticazione fallita. Riprova."}
-        result = send_email(token, form_data["sender_email"], "matteo@rewave.it", form_data["email_subject"], form_data["email_text"])   # TODO change target email with form_data["recipient_email"]
+        result = send_email(token, form_data["sender_email"], form_data["recipient_email"], form_data["email_subject"], form_data["email_text"])
         return {"output": result}
