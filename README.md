@@ -25,7 +25,7 @@ Self-hosted deployment of [Cheshire Cat AI](https://cheshirecat.ai/) configured 
 
 ## Setup
 
-1. Copy `.env.example` (create one from the variables referenced in `compose.yml`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `LITELLM_MASTER_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`, `LITELLM_DB_PASSWORD`) to `.env`.
+1. Copy `.env.example` to `.env` (and `plugins/vanna/.env.example` to `plugins/vanna/.env` for local Vanna training) and fill in real values.
 2. `docker compose up -d`.
 3. Trust the Caddy internal CA on client machines to avoid browser TLS warnings (see `caddy/Caddyfile`).
 4. Open `https://cat.rewave.local` to configure plugins from the admin UI.
